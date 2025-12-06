@@ -4,73 +4,141 @@ import { Loader2, ShieldAlert, Lock, Eye } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Card } from '../../components/ui/Card';
+import api from '../../services/api';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+// remove trailing /api to get backend root
+const REDIRECT_BASE = API_BASE.replace(/\/api\/?$/, '');
 
 const RedirectHandler = () => {
   const { slug } = useParams();
-  const [status, setStatus] = useState('analyzing'); // analyzing, password, preview, error, redirecting
+
+  const [status, setStatus] = useState('loading'); // loading | redirect | not_found | expired | scheduled | password | preview | error
+  const [linkData, setLinkData] = useState(null);
+  const [reason, setReason] = useState('');
+  const [startsAt, setStartsAt] = useState(null);
+
   const [passwordInput, setPasswordInput] = useState('');
-  
-  // Mock Data to simulate different link types for your Demo
-  const mockLinkData = {
-    'secure': { type: 'password', target: 'https://google.com' },
-    'preview': { type: 'preview', target: 'https://github.com' },
-    'expired': { type: 'error', error: 'Link has self-destructed.' },
-    'burn': { type: 'burn', target: 'https://secret.com' } // Simulate one-time view
-  };
+  const [passwordError, setPasswordError] = useState('');
 
   useEffect(() => {
-    // Simulate Server Lookup
-    setTimeout(() => {
-      const data = mockLinkData[slug];
+    const fetchLink = async () => {
+      try {
+        setStatus('loading');
 
-      if (!data) {
-        // Default behavior for unknown links (Simulate standard redirect)
-        window.location.href = 'https://google.com';
-        return;
-      }
+        const res = await api.get(`/links/${slug}`);
 
-      if (data.type === 'error') {
+        // backend might return 200 with status field
+        if (res.data.status === 'not_found') {
+          setStatus('not_found');
+          return;
+        }
+
+        if (res.data.status === 'expired') {
+          setStatus('expired');
+          setReason(res.data.reason || 'Link has self-destructed.');
+          return;
+        }
+
+        if (res.data.status === 'scheduled') {
+          setStatus('scheduled');
+          setReason(res.data.reason || 'Link is not active yet.');
+          if (res.data.startsAt) {
+            setStartsAt(res.data.startsAt);
+          }
+          return;
+        }
+
+        const link = res.data.link;
+        setLinkData(link);
+
+        // order: password first, then preview, then direct redirect
+        if (link.password) {
+          setStatus('password');
+          return;
+        }
+
+        if (link.showPreview) {
+          setStatus('preview');
+          return;
+        }
+
+        // Otherwise: direct redirect via backend /r/:slug
+        setStatus('redirect');
+        setTimeout(() => {
+          window.location.href = `${REDIRECT_BASE}/r/${slug}`;
+        }, 800);
+      } catch (err) {
+        console.error(err);
         setStatus('error');
-      } else if (data.type === 'password') {
-        setStatus('password');
-      } else if (data.type === 'preview') {
-        setStatus('preview');
-      } else {
-        // Direct redirect
-        window.location.href = data.target;
       }
-    }, 1500);
+    };
+
+    fetchLink();
   }, [slug]);
 
-  const handleUnlock = (e) => {
+  const handlePasswordSubmit = (e) => {
     e.preventDefault();
-    if (passwordInput === '1234') { // Mock Password
-        setStatus('redirecting');
-        setTimeout(() => window.location.href = 'https://google.com', 1000);
+    if (!linkData) return;
+
+    if (!passwordInput.trim()) {
+      setPasswordError('Password is required.');
+      return;
+    }
+
+    // NOTE: for now, this compares plain text password coming from backend.
+    // In real production, you would hash + verify on the server.
+    if (passwordInput === linkData.password) {
+      setPasswordError('');
+
+      // if preview is also enabled, go to preview step next
+      if (linkData.showPreview) {
+        setStatus('preview');
+      } else {
+        setStatus('redirect');
+        setTimeout(() => {
+          window.location.href = `${REDIRECT_BASE}/r/${slug}`;
+        }, 800);
+      }
     } else {
-        alert("Decryption Failed: Invalid Credentials");
+      setPasswordError('Incorrect password. Try again.');
     }
   };
 
-  const handleProceed = () => {
-    setStatus('redirecting');
-    setTimeout(() => window.location.href = 'https://github.com', 800);
-  };
+  // -----------------------
+  // RENDER STATES
+  // -----------------------
 
-  // --- RENDER STATES ---
-
-  if (status === 'analyzing' || status === 'redirecting') {
+  if (status === 'loading' || status === 'redirect') {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
         <Loader2 className="w-12 h-12 text-emerald-500 animate-spin mb-4" />
         <p className="text-slate-400 font-mono text-sm animate-pulse">
-            {status === 'analyzing' ? 'Establishing Secure Handshake...' : 'Decryption Complete. Redirecting...'}
+          {status === 'loading'
+            ? 'Establishing Secure Handshake...'
+            : 'Decryption Complete. Redirecting...'}
         </p>
       </div>
     );
   }
 
-  if (status === 'error') {
+  if (status === 'not_found') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full p-8 text-center border-red-500/20 bg-slate-900">
+          <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 text-red-500">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-2">Link Not Found</h1>
+          <p className="text-slate-400">
+            This Deadman link does not exist or was removed.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
+  if (status === 'expired') {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
         <Card className="max-w-md w-full p-8 text-center border-red-500/20 bg-slate-900">
@@ -79,13 +147,35 @@ const RedirectHandler = () => {
           </div>
           <h1 className="text-2xl font-bold text-white mb-2">Connection Terminated</h1>
           <p className="text-slate-400">
-            This Deadman link has expired or self-destructed.
+            {reason || 'This Deadman link has expired or self-destructed.'}
           </p>
         </Card>
       </div>
     );
   }
 
+  if (status === 'scheduled') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full p-8 text-center border-slate-700 bg-slate-900">
+          <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-6 text-blue-400">
+            <Eye className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-2">Link Not Active Yet</h1>
+          <p className="text-slate-400 text-sm">
+            {reason || 'This Deadman link is scheduled to activate later.'}
+          </p>
+          {startsAt && (
+            <p className="text-xs text-slate-500 mt-2">
+              Activation time: {new Date(startsAt).toLocaleString()}
+            </p>
+          )}
+        </Card>
+      </div>
+    );
+  }
+
+  // PASSWORD MODE
   if (status === 'password') {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -95,25 +185,37 @@ const RedirectHandler = () => {
               <Lock className="w-6 h-6" />
             </div>
             <h2 className="text-xl font-bold text-white">Encrypted Payload</h2>
-            <p className="text-slate-400 text-sm mt-1">Enter access code to decrypt destination.</p>
+            <p className="text-slate-400 text-sm mt-1">
+              Enter password to decrypt destination.
+            </p>
           </div>
-          <form onSubmit={handleUnlock}>
-            <Input 
-              type="password" 
-              placeholder="Enter Password..." 
+
+          <form onSubmit={handlePasswordSubmit} className="space-y-3">
+            <Input
+              type="password"
+              placeholder="Enter Password..."
               value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
+              onChange={(e) => {
+                setPasswordInput(e.target.value);
+                setPasswordError('');
+              }}
               className="text-center tracking-widest font-mono"
               autoFocus
             />
-            <Button className="mt-4">Decrypt & Access</Button>
+            {passwordError && (
+              <p className="text-xs text-red-400 text-center">{passwordError}</p>
+            )}
+            <Button className="mt-2 w-full" type="submit">
+              Unlock
+            </Button>
           </form>
         </Card>
       </div>
     );
   }
 
-  if (status === 'preview') {
+  // PREVIEW MODE (after password if needed)
+  if (status === 'preview' && linkData) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
         <Card className="max-w-md w-full p-8 border-slate-800 bg-slate-900">
@@ -122,17 +224,48 @@ const RedirectHandler = () => {
               <Eye className="w-6 h-6" />
             </div>
             <h2 className="text-xl font-bold text-white">Safety Preview</h2>
-            <p className="text-slate-400 text-sm mt-2">
-                You are leaving Deadman Link and visiting:
-            </p>
-            <div className="my-4 p-3 bg-slate-950 border border-slate-800 rounded text-emerald-400 font-mono text-sm truncate">
-                https://github.com/project-files
-            </div>
           </div>
+
+          <div className="my-4 p-3 bg-slate-950 border border-slate-800 rounded text-emerald-400 font-mono text-sm truncate">
+            {linkData.targetUrl}
+          </div>
+
           <div className="space-y-3">
-            <Button onClick={handleProceed}>Proceed to Destination</Button>
-            <Button variant="secondary" onClick={() => window.close()}>Cancel</Button>
+            <Button
+              onClick={() => {
+                setStatus('redirect');
+                setTimeout(() => {
+                  window.location.href = `${REDIRECT_BASE}/r/${slug}`;
+                }, 800);
+              }}
+            >
+              Proceed to Destination
+            </Button>
+
+            <Button
+              variant="secondary"
+              type="button"
+              className="w-full"
+              onClick={() => {
+                // simple cancel – user can close tab or go back
+                window.history.back();
+              }}
+            >
+              Cancel
+            </Button>
           </div>
+        </Card>
+      </div>
+    );
+  }
+
+  // Error fallback
+  if (status === 'error') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full p-8 text-center border-red-500/20 bg-slate-900">
+          <h1 className="text-2xl font-bold text-white mb-2">Something went wrong</h1>
+          <p className="text-slate-400 text-sm">Please try again later.</p>
         </Card>
       </div>
     );

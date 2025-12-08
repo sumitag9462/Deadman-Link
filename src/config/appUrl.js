@@ -1,37 +1,18 @@
-// File: src/config/appUrl.js
+// src/config/appUrl.js
+// Computes the base URL used in short links / QR codes
 
-// Optional: set in .env (see below)
 const DEV_LAN_IP = import.meta.env.VITE_DEV_LAN_IP;
-const EXPLICIT_APP_URL = import.meta.env.VITE_APP_URL;
+let APP_BASE_URL = import.meta.env.VITE_APP_URL;
 
-let base = '';
-
-if (EXPLICIT_APP_URL) {
-  // If you provide a full URL in env, always use that
-  base = EXPLICIT_APP_URL;
-} else if (typeof window !== 'undefined') {
-  const current = window.location.origin;
-  const url = new URL(current);
-
-  // If you're running on localhost but you've told us your LAN IP,
-  // swap localhost -> 192.168.x.x:port so QR works on phone.
-  if (
-    DEV_LAN_IP &&
-    (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
-  ) {
-    base = `${url.protocol}//${DEV_LAN_IP}${url.port ? ':' + url.port : ''}`;
+// If VITE_APP_URL is not set, fall back smartly
+if (!APP_BASE_URL) {
+  if (DEV_LAN_IP) {
+    // dev LAN mode
+    APP_BASE_URL = `http://${DEV_LAN_IP}:5173`;
   } else {
-    base = current;
+    // default to current origin (localhost:5173 in dev, real domain in prod)
+    APP_BASE_URL = window.location.origin;
   }
-} else {
-  base = '';
 }
 
-// strip trailing slashes
-export const APP_BASE_URL = base.replace(/\/+$/, '');
-
-// (optional) debug: see what URL is actually being used
-if (typeof window !== 'undefined') {
-  // eslint-disable-next-line no-console
-  console.log('[Deadman-Link] APP_BASE_URL =', APP_BASE_URL);
-}
+export { APP_BASE_URL };

@@ -17,6 +17,13 @@ const linkSchema = new mongoose.Schema(
 
     clicks: { type: Number, default: 0 },
     status: { type: String, default: 'active' },
+
+    // Creator info
+    creatorName: { type: String, default: 'Anonymous' },
+    creatorAvatar: { type: String, default: null }, // URL to creator's avatar
+
+    // Favorites / Highlights
+    isFavorite: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

@@ -4,8 +4,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
-    host: '0.0.0.0',   // allow access via 192.168.1.5
-    port: 5173,
+    host: '0.0.0.0',   // allow LAN access e.g. 192.168.x.x
+    port: 5174,        // unified dev port after merge
     strictPort: true,
   },
 });

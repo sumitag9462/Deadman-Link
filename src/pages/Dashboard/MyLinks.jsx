@@ -14,6 +14,9 @@ import {
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { CreateLinkForm } from '../../components/links/CreateLinkForm';
+import { EditLinkForm } from '../../components/links/EditLinkForm';
+import { LinkActionMenu } from '../../components/links/LinkActionMenu';
+import { DeleteConfirmationModal } from '../../components/links/DeleteConfirmationModal';
 import { Table } from '../../components/ui/Table';
 import { Badge } from '../../components/ui/Badge';
 import { useClipboard } from '../../hooks/useClipboard';
@@ -106,6 +109,8 @@ const buildLinkUrl = (slug) => {
 
 const MyLinks = () => {
   const [isCreateOpen, setCreateOpen] = useState(false);
+  const [editingLink, setEditingLink] = useState(null);
+  const [deleteLink, setDeleteLink] = useState(null);
   const [qrLink, setQrLink] = useState(null);
   const [filter, setFilter] = useState('All');
 
@@ -129,6 +134,17 @@ const MyLinks = () => {
     }
   };
 
+  const handleToggleFavorite = async (link) => {
+    try {
+      const res = await api.patch(`/links/${link._id}/favorite`);
+      setLinks((prev) =>
+        prev.map((l) => (l._id === link._id ? res.data : l))
+      );
+    } catch (err) {
+      console.error('Failed to toggle favorite', err);
+    }
+  };
+
   useEffect(() => {
     loadLinks();
   }, []);
@@ -137,6 +153,27 @@ const MyLinks = () => {
     setCreateOpen(false);
     // re-fetch list after creating a link
     loadLinks();
+  };
+
+  const handleEditLink = (link) => {
+    setEditingLink(link);
+  };
+
+  const handleEditSuccess = (updatedLink) => {
+    // Update the link in the list
+    setLinks((prev) =>
+      prev.map((l) => (l._id === updatedLink._id ? updatedLink : l))
+    );
+    setEditingLink(null);
+  };
+
+  const handleDeleteLink = (link) => {
+    setDeleteLink(link);
+  };
+
+  const handleDeletedLink = (linkId) => {
+    setLinks((prev) => prev.filter((l) => l._id !== linkId));
+    setDeleteLink(null);
   };
 
   // Apply collection filter
@@ -149,18 +186,31 @@ const MyLinks = () => {
       })
     : [];
 
+  // Calculate collection counts
+  const collectionCounts = {
+    All: links.length,
+    General: links.filter((l) => (l.collection || 'General') === 'General').length,
+    Intel: links.filter((l) => (l.collection || 'General') === 'Intel').length,
+    Personal: links.filter((l) => (l.collection || 'General') === 'Personal').length,
+  };
+
   const columns = [
     {
       header: 'Identity',
       className: 'w-1/3',
       cell: (row) => (
         <div className="flex items-center gap-3">
-          {/* Favorite button (future) */}
+          {/* Favorite button */}
           <button
-            className="text-slate-600 hover:text-yellow-400 transition-colors"
-            title="Mark as Favorite"
+            onClick={() => handleToggleFavorite(row)}
+            className={`transition-colors ${
+              row.isFavorite
+                ? 'text-yellow-400'
+                : 'text-slate-600 hover:text-yellow-400'
+            }`}
+            title={row.isFavorite ? 'Remove from favorites' : 'Mark as favorite'}
           >
-            <Star className="w-4 h-4" />
+            <Star className="w-4 h-4" fill={row.isFavorite ? 'currentColor' : 'none'} />
           </button>
 
           {/* Link avatar */}
@@ -170,7 +220,7 @@ const MyLinks = () => {
             className="w-9 h-9 rounded-full border border-slate-700 bg-slate-800 object-cover shrink-0"
           />
 
-          {/* Icon + title + url + badges */}
+          {/* Icon + title + url + badges + creator */}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <div className="w-9 h-9 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400 shrink-0 border border-slate-700">
@@ -180,13 +230,18 @@ const MyLinks = () => {
                   <ExternalLink className="w-5 h-5" />
                 )}
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="font-medium text-slate-200 truncate">
                   {row.title || 'Untitled Operation'}
                 </div>
                 <div className="text-xs text-slate-500 truncate max-w-[200px]">
                   {row.targetUrl}
                 </div>
+                {row.creatorName && (
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    by {row.creatorName}
+                  </div>
+                )}
               </div>
             </div>
             <StatusBadges link={row} />
@@ -286,6 +341,20 @@ const MyLinks = () => {
         </span>
       ),
     },
+    {
+      header: 'Actions',
+      cell: (row) => {
+        const url = buildLinkUrl(row.slug);
+        return (
+          <LinkActionMenu
+            link={row}
+            url={url}
+            onEdit={() => handleEditLink(row)}
+            onDelete={() => handleDeleteLink(row)}
+          />
+        );
+      },
+    },
   ];
 
   return (
@@ -308,10 +377,10 @@ const MyLinks = () => {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             >
-              <option value="All">All Collections</option>
-              <option value="General">General</option>
-              <option value="Intel">Intel</option>
-              <option value="Personal">Personal</option>
+              <option value="All">All Collections ({collectionCounts.All})</option>
+              <option value="General">General ({collectionCounts.General})</option>
+              <option value="Intel">Intel ({collectionCounts.Intel})</option>
+              <option value="Personal">Personal ({collectionCounts.Personal})</option>
             </select>
           </div>
           <Button
@@ -333,6 +402,26 @@ const MyLinks = () => {
       >
         <CreateLinkForm onSuccess={handleLinkCreated} />
       </Modal>
+
+      <Modal
+        isOpen={!!editingLink}
+        onClose={() => setEditingLink(null)}
+        title="Edit Link"
+      >
+        {editingLink && (
+          <EditLinkForm
+            link={editingLink}
+            onSuccess={handleEditSuccess}
+          />
+        )}
+      </Modal>
+
+      <DeleteConfirmationModal
+        isOpen={!!deleteLink}
+        onClose={() => setDeleteLink(null)}
+        link={deleteLink}
+        onDeleted={handleDeletedLink}
+      />
 
       <QRPopup
         isOpen={!!qrLink}

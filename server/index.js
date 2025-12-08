@@ -14,7 +14,8 @@ const adminRoutes = require('./routes/adminRoutes');
 const adminLinkRoutes = require('./routes/adminLinkRoutes');
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+// Default to a less common port to reduce local collisions
+const PORT = process.env.PORT || 5050;
 
 app.use(cors());
 app.use(express.json());
@@ -44,9 +45,11 @@ app.use('/api/watch', watchRoutes);
 // analytics REST routes (REAL data)
 app.use('/api/analytics', analyticsRoutes);
 
-app.use('/api/admin', adminRoutes);
-
+// admin link management routes (more specific -> mount first)
 app.use('/api/admin/links', adminLinkRoutes);
+
+// other admin routes
+app.use('/api/admin', adminRoutes);
 
 // GET /api/links - list all links
 app.get('/api/links', async (req, res) => {
@@ -129,6 +132,7 @@ app.post('/api/links', async (req, res) => {
       showPreview,
       collection,
       scheduleStart,
+      creatorName,
     } = req.body || {};
 
     if (!url) {
@@ -170,11 +174,91 @@ app.post('/api/links', async (req, res) => {
       showPreview: !!showPreview,
       collection: collection || 'General',
       scheduleStart: scheduleStart ? new Date(scheduleStart) : null,
+      creatorName: creatorName || 'Anonymous',
+      isFavorite: false,
     });
 
     return res.status(201).json(newLink);
   } catch (err) {
     console.error('Error in POST /api/links:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// PUT /api/links/:id - update link details
+app.put('/api/links/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      title,
+      targetUrl,
+      password,
+      isOneTime,
+      maxClicks,
+      expiresAt,
+      showPreview,
+      collection,
+      creatorName,
+    } = req.body || {};
+
+    const link = await Link.findById(id);
+    if (!link) {
+      return res.status(404).json({ message: 'Link not found' });
+    }
+
+    // Update allowed fields
+    if (title !== undefined) link.title = title;
+    if (targetUrl !== undefined) link.targetUrl = targetUrl;
+    if (password !== undefined) link.password = password || null;
+    if (isOneTime !== undefined) link.isOneTime = !!isOneTime;
+    if (maxClicks !== undefined) link.maxClicks = maxClicks;
+    if (expiresAt !== undefined)
+      link.expiresAt = expiresAt ? new Date(expiresAt) : null;
+    if (showPreview !== undefined) link.showPreview = !!showPreview;
+    if (collection !== undefined) link.collection = collection;
+    if (creatorName !== undefined) link.creatorName = creatorName;
+
+    const updated = await link.save();
+    return res.status(200).json(updated);
+  } catch (err) {
+    console.error('Error in PUT /api/links/:id:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// PATCH /api/links/:id/favorite - toggle favorite status
+app.patch('/api/links/:id/favorite', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const link = await Link.findById(id);
+    if (!link) {
+      return res.status(404).json({ message: 'Link not found' });
+    }
+
+    link.isFavorite = !link.isFavorite;
+    const updated = await link.save();
+    return res.status(200).json(updated);
+  } catch (err) {
+    console.error('Error in PATCH /api/links/:id/favorite:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// DELETE /api/links/:id - delete a link
+app.delete('/api/links/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await Link.findByIdAndDelete(id);
+    if (!result) {
+      return res.status(404).json({ message: 'Link not found' });
+    }
+
+    return res
+      .status(200)
+      .json({ message: 'Link deleted successfully' });
+  } catch (err) {
+    console.error('Error in DELETE /api/links/:id:', err);
     res.status(500).json({ message: 'Internal server error' });
   }
 });

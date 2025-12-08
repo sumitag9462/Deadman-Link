@@ -1,12 +1,21 @@
 // src/components/analytics/ClickChart.jsx
 import React from 'react';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Area,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  ReferenceLine,
+} from 'recharts';
 import { Card } from '../ui/Card';
 
 export const ClickChart = ({ data = [], loading }) => {
-  // Normalize API data -> recharts data
+  // Normalize API data → recharts data
   const chartData = (data || []).map((point) => ({
-    // show only MM-DD in label
     date: point.date ? point.date.slice(5) : '',
     clicks: typeof point.clicks === 'number' ? point.clicks : 0,
   }));
@@ -33,14 +42,19 @@ export const ClickChart = ({ data = [], loading }) => {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <ComposedChart
+              data={chartData}
+              margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+            >
               <defs>
                 <linearGradient id="clicksGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.6} />
+                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.65} />
                   <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
                 </linearGradient>
               </defs>
+
               <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+
               <XAxis
                 dataKey="date"
                 stroke="#6b7280"
@@ -54,7 +68,9 @@ export const ClickChart = ({ data = [], loading }) => {
                 tickMargin={8}
                 fontSize={10}
                 allowDecimals={false}
+                domain={[0, (dataMax) => Math.max(dataMax, 5)]}
               />
+
               <Tooltip
                 contentStyle={{
                   backgroundColor: '#020617',
@@ -64,14 +80,29 @@ export const ClickChart = ({ data = [], loading }) => {
                 labelStyle={{ color: '#9ca3af' }}
                 formatter={(value) => [`${value} clicks`, '']}
               />
+
+              <ReferenceLine y={0} stroke="#1f2937" />
+
+              {/* teammate’s bars + your data */}
+              <Bar
+                dataKey="clicks"
+                barSize={14}
+                radius={[4, 4, 0, 0]}
+                fill="#16a34a"
+                opacity={0.35}
+              />
+
+              {/* your area line + improved dots */}
               <Area
                 type="monotone"
                 dataKey="clicks"
                 stroke="#22c55e"
                 fill="url(#clicksGradient)"
-                strokeWidth={2}
+                strokeWidth={2.4}
+                dot={{ r: 3, fill: '#22c55e', stroke: '#0f172a', strokeWidth: 1 }}
+                activeDot={{ r: 5 }}
               />
-            </AreaChart>
+            </ComposedChart>
           </ResponsiveContainer>
         )}
       </div>

@@ -23,6 +23,7 @@ import { useClipboard } from '../../hooks/useClipboard';
 import { QRPopup } from '../../components/links/QRPopup';
 import api from '../../services/api';
 import { APP_BASE_URL } from '../../config/appUrl'; // uses env + origin
+import { useAuth } from '../../hooks/useAuth';
 
 const StatusBadges = ({ link }) => {
   const badges = [];
@@ -108,6 +109,7 @@ const buildLinkUrl = (slug) => {
 };
 
 const MyLinks = () => {
+  const { user } = useAuth();
   const [isCreateOpen, setCreateOpen] = useState(false);
   const [editingLink, setEditingLink] = useState(null);
   const [deleteLink, setDeleteLink] = useState(null);
@@ -119,12 +121,18 @@ const MyLinks = () => {
 
   const { copy } = useClipboard();
 
-  // Directly fetch from backend instead of useFetch hook
-  const loadLinks = async () => {
+  // Fetch only the current user's links
+  const loadLinks = async (ownerEmail) => {
+    if (!ownerEmail) {
+      setLinks([]);
+      return;
+    }
+
     try {
       setLoading(true);
-      const res = await api.get('/links');
-      // backend returns an array of link docs
+      const res = await api.get('/links', {
+        params: { ownerEmail },
+      });
       setLinks(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Failed to load links', err);
@@ -146,13 +154,16 @@ const MyLinks = () => {
   };
 
   useEffect(() => {
-    loadLinks();
-  }, []);
+    if (user?.email) {
+      loadLinks(user.email);
+    }
+  }, [user?.email]);
 
   const handleLinkCreated = () => {
     setCreateOpen(false);
-    // re-fetch list after creating a link
-    loadLinks();
+    if (user?.email) {
+      loadLinks(user.email);
+    }
   };
 
   const handleEditLink = (link) => {
@@ -189,9 +200,12 @@ const MyLinks = () => {
   // Calculate collection counts
   const collectionCounts = {
     All: links.length,
-    General: links.filter((l) => (l.collection || 'General') === 'General').length,
-    Intel: links.filter((l) => (l.collection || 'General') === 'Intel').length,
-    Personal: links.filter((l) => (l.collection || 'General') === 'Personal').length,
+    General: links.filter((l) => (l.collection || 'General') === 'General')
+      .length,
+    Intel: links.filter((l) => (l.collection || 'General') === 'Intel')
+      .length,
+    Personal: links.filter((l) => (l.collection || 'General') === 'Personal')
+      .length,
   };
 
   const columns = [
@@ -210,7 +224,10 @@ const MyLinks = () => {
             }`}
             title={row.isFavorite ? 'Remove from favorites' : 'Mark as favorite'}
           >
-            <Star className="w-4 h-4" fill={row.isFavorite ? 'currentColor' : 'none'} />
+            <Star
+              className="w-4 h-4"
+              fill={row.isFavorite ? 'currentColor' : 'none'}
+            />
           </button>
 
           {/* Link avatar */}
@@ -377,10 +394,18 @@ const MyLinks = () => {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             >
-              <option value="All">All Collections ({collectionCounts.All})</option>
-              <option value="General">General ({collectionCounts.General})</option>
-              <option value="Intel">Intel ({collectionCounts.Intel})</option>
-              <option value="Personal">Personal ({collectionCounts.Personal})</option>
+              <option value="All">
+                All Collections ({collectionCounts.All})
+              </option>
+              <option value="General">
+                General ({collectionCounts.General})
+              </option>
+              <option value="Intel">
+                Intel ({collectionCounts.Intel})
+              </option>
+              <option value="Personal">
+                Personal ({collectionCounts.Personal})
+              </option>
             </select>
           </div>
           <Button

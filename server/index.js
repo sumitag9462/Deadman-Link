@@ -12,6 +12,7 @@ const Link = require('./models/Link');
 const AnalyticsEvent = require('./models/AnalyticsEvent');
 const adminRoutes = require('./routes/adminRoutes');
 const adminLinkRoutes = require('./routes/adminLinkRoutes');
+const adminUserRoutes = require('./routes/adminUserRoutes');
 
 const app = express();
 // Default to a less common port to reduce local collisions
@@ -51,16 +52,30 @@ app.use('/api/admin/links', adminLinkRoutes);
 // other admin routes
 app.use('/api/admin', adminRoutes);
 
-// GET /api/links - list all links
+// admin user access controls
+app.use('/api/admin/users', adminUserRoutes);
+
+
+// GET /api/links - list links, optionally filtered by ownerEmail
 app.get('/api/links', async (req, res) => {
   try {
-    const links = await Link.find().sort({ createdAt: -1 });
+    const { ownerEmail } = req.query;
+
+    const query = {};
+
+    // If ownerEmail is provided, only return that user's links
+    if (ownerEmail) {
+      query.ownerEmail = ownerEmail;
+    }
+
+    const links = await Link.find(query).sort({ createdAt: -1 });
     res.json(links);
   } catch (err) {
     console.error('Error fetching links:', err);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
 
 // GET /api/links/:slug - fetch a single link with rule checks
 app.get('/api/links/:slug', async (req, res) => {
@@ -133,6 +148,7 @@ app.post('/api/links', async (req, res) => {
       collection,
       scheduleStart,
       creatorName,
+       ownerEmail,
     } = req.body || {};
 
     if (!url) {
@@ -175,6 +191,7 @@ app.post('/api/links', async (req, res) => {
       collection: collection || 'General',
       scheduleStart: scheduleStart ? new Date(scheduleStart) : null,
       creatorName: creatorName || 'Anonymous',
+      ownerEmail: ownerEmail || null,
       isFavorite: false,
     });
 
@@ -369,6 +386,10 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
   },
 });
+
+// expose io to all routes via req.app.get('io')
+app.set('io', io);
+
 
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);

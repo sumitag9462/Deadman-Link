@@ -13,8 +13,10 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../../services/api';
+import { useAuth } from '../../hooks/useAuth';
 
 export const CreateLinkForm = ({ onSuccess }) => {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('basic'); // basic | security | advanced
 
@@ -65,10 +67,11 @@ export const CreateLinkForm = ({ onSuccess }) => {
 
       // Payload that matches backend POST /api/links
       const payload = {
-        url: form.url, // ❗ backend expects `url`
+        url: form.url, // backend expects `url`
         slug: form.slug || undefined,
         title: form.title || form.url,
-        creatorName: form.creatorName || 'Anonymous',
+        creatorName:
+          form.creatorName || user?.name || user?.email || 'Anonymous',
         password: form.password || undefined,
         isOneTime: form.isOneTime,
         maxClicks: normalizedMaxClicks,
@@ -76,9 +79,11 @@ export const CreateLinkForm = ({ onSuccess }) => {
         showPreview: form.showPreview,
         collection: form.collection,
         scheduleStart: form.scheduleStart || undefined,
+        // 🔴 tie link to the logged-in user
+        ownerEmail: user?.email || null,
       };
 
-      // Strip undefined
+      // Strip undefined so we don't send junk
       Object.keys(payload).forEach((key) => {
         if (payload[key] === undefined) delete payload[key];
       });
@@ -90,11 +95,12 @@ export const CreateLinkForm = ({ onSuccess }) => {
 
       toast.success('Link encrypted & armed.');
 
-      // Reset form
+      // Reset form (keep collection)
       setForm({
         url: '',
         slug: '',
         title: '',
+        creatorName: '',
         password: '',
         isOneTime: false,
         maxClicks: 0,
@@ -160,7 +166,9 @@ export const CreateLinkForm = ({ onSuccess }) => {
               label="Creator Name (Optional)"
               placeholder="Your name or team"
               value={form.creatorName}
-              onChange={(e) => setForm({ ...form, creatorName: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, creatorName: e.target.value })
+              }
               icon={<User className="w-4 h-4" />}
             />
 

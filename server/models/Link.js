@@ -22,6 +22,9 @@ const linkSchema = new mongoose.Schema(
     creatorName: { type: String, default: 'Anonymous' },
     creatorAvatar: { type: String, default: null }, // URL to creator's avatar
 
+    // Who actually owns this link (for per-user dashboards)
+    ownerEmail: { type: String, default: null },
+
     // Favorites / Highlights
     isFavorite: { type: Boolean, default: false },
   },

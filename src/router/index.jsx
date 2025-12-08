@@ -25,7 +25,7 @@ import WatchParty from '../pages/Dashboard/WatchParty'; // ✅ NEW
 import AdminLayout from '../components/layout/AdminLayout';
 import AdminDashboard from '../pages/Admin/AdminDashboard';
 import LinkManagement from '../pages/Admin/LinkManagement';
-import UserManagement from '../pages/Admin/UserManagement';
+import UserControls from '../pages/Admin/UserControls';
 import AuditLogs from '../pages/Admin/AuditLogs';
 import SystemSettings from '../pages/Admin/SystemSettings';
 
@@ -40,8 +40,9 @@ const ProtectedRoute = ({ children }) => {
 const AdminRoute = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return null;
-  if (!user || user.role !== 'admin')
+  if (!user || user.role !== 'admin') {
     return <Navigate to="/dashboard" replace />;
+  }
   return children;
 };
 
@@ -81,7 +82,7 @@ const AppRouter = () => {
       >
         <Route index element={<AdminDashboard />} />
         <Route path="links" element={<LinkManagement />} />
-        <Route path="users" element={<UserManagement />} />
+        <Route path="users" element={<UserControls />} />
         <Route path="logs" element={<AuditLogs />} />
         <Route path="settings" element={<SystemSettings />} />
       </Route>

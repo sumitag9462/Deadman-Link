@@ -1,10 +1,19 @@
+// server/index.js
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const http = require('http');
+const { Server } = require('socket.io');
 require('dotenv').config();
 
+const watchRoutes = require('./routes/watchRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
+const Link = require('./models/Link');
+const AnalyticsEvent = require('./models/AnalyticsEvent');
+
 const app = express();
-const PORT = process.env.PORT || 4000;
+// Default to a less common port to reduce local collisions
+const PORT = process.env.PORT || 5050;
 
 app.use(cors());
 app.use(express.json());
@@ -21,39 +30,20 @@ mongoose
     process.exit(1);
   });
 
-// ---- Link model (same fields as your in-memory object) ----
-const linkSchema = new mongoose.Schema(
-  {
-    title: { type: String },
-    slug: { type: String, required: true, unique: true },
-    targetUrl: { type: String, required: true },
-
-    // security / rules
-    password: { type: String, default: null }, // TODO: hash later
-    isOneTime: { type: Boolean, default: false },
-    maxClicks: { type: Number, default: 0 }, // 0 = unlimited
-    expiresAt: { type: Date, default: null },
-    showPreview: { type: Boolean, default: false },
-    collection: { type: String, default: 'General' },
-    scheduleStart: { type: Date, default: null },
-
-    // status / tracking
-    clicks: { type: Number, default: 0 },
-    status: { type: String, default: 'active' }, // active | expired
-  },
-  { timestamps: true }
-);
-
-const Link = mongoose.model('Link', linkSchema);
-
-// ---------------- ROUTES ---------------- //
+// ---------------- REST ROUTES ---------------- //
 
 // health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// GET /api/links - list all links (for now, all users)
+// watch party REST routes
+app.use('/api/watch', watchRoutes);
+
+// analytics REST routes (REAL data)
+app.use('/api/analytics', analyticsRoutes);
+
+// GET /api/links - list all links
 app.get('/api/links', async (req, res) => {
   try {
     const links = await Link.find().sort({ createdAt: -1 });
@@ -64,7 +54,7 @@ app.get('/api/links', async (req, res) => {
   }
 });
 
-// GET /api/links/:slug - fetch a single link and apply read-only rules
+// GET /api/links/:slug - fetch a single link with rule checks
 app.get('/api/links/:slug', async (req, res) => {
   try {
     const { slug } = req.params;
@@ -77,20 +67,18 @@ app.get('/api/links/:slug', async (req, res) => {
     const now = new Date();
 
     // EXPIRY CHECK
-    if (link.expiresAt) {
-      if (now > link.expiresAt) {
-        if (link.status !== 'expired') {
-          link.status = 'expired';
-          await link.save();
-        }
-        return res.status(200).json({
-          status: 'expired',
-          reason: 'Link has self-destructed.',
-        });
+    if (link.expiresAt && now > link.expiresAt) {
+      if (link.status !== 'expired') {
+        link.status = 'expired';
+        await link.save();
       }
+      return res.status(200).json({
+        status: 'expired',
+        reason: 'Link has self-destructed.',
+      });
     }
 
-    // CLICK LIMIT CHECK (one-time / multi-use)
+    // CLICK LIMIT CHECK
     const effectiveLimit = link.isOneTime ? 1 : link.maxClicks || 0;
     if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
       if (link.status !== 'expired') {
@@ -104,17 +92,14 @@ app.get('/api/links/:slug', async (req, res) => {
     }
 
     // Scheduled activation
-    if (link.scheduleStart) {
-      if (now < link.scheduleStart) {
-        return res.status(200).json({
-          status: 'scheduled',
-          reason: 'Link is not active yet.',
-          startsAt: link.scheduleStart,
-        });
-      }
+    if (link.scheduleStart && now < link.scheduleStart) {
+      return res.status(200).json({
+        status: 'scheduled',
+        reason: 'Link is not active yet.',
+        startsAt: link.scheduleStart,
+      });
     }
 
-    // ACTIVE LINK
     return res.status(200).json({
       status: 'active',
       link,
@@ -139,13 +124,14 @@ app.post('/api/links', async (req, res) => {
       showPreview,
       collection,
       scheduleStart,
+      creatorName,
     } = req.body || {};
 
     if (!url) {
       return res.status(400).json({ message: 'url is required' });
     }
 
-    // If user provided a slug, validate uniqueness
+    // slug handling
     let finalSlug;
     if (slug && slug.trim()) {
       const normalizedSlug = slug.trim();
@@ -155,9 +141,7 @@ app.post('/api/links', async (req, res) => {
       }
       finalSlug = normalizedSlug;
     } else {
-      // Simple slug generation if not provided
       finalSlug = Math.random().toString(36).substring(2, 8);
-      // Ensure slug is unique in DB
       let exists = await Link.findOne({ slug: finalSlug });
       while (exists) {
         finalSlug = Math.random().toString(36).substring(2, 8);
@@ -165,7 +149,6 @@ app.post('/api/links', async (req, res) => {
       }
     }
 
-    // normalize fields
     const now = new Date();
 
     const newLink = await Link.create({
@@ -176,13 +159,15 @@ app.post('/api/links', async (req, res) => {
       status: 'active',
       createdAt: now,
 
-      password: password || null, // TODO: hash later
+      password: password || null,
       isOneTime: !!isOneTime,
-      maxClicks: maxClicks || 0, // 0 = unlimited
+      maxClicks: maxClicks || 0,
       expiresAt: expiresAt ? new Date(expiresAt) : null,
       showPreview: !!showPreview,
       collection: collection || 'General',
       scheduleStart: scheduleStart ? new Date(scheduleStart) : null,
+      creatorName: creatorName || 'Anonymous',
+      isFavorite: false,
     });
 
     return res.status(201).json(newLink);
@@ -192,7 +177,16 @@ app.post('/api/links', async (req, res) => {
   }
 });
 
-// REAL REDIRECT ENDPOINT - handles clicks + limits + expiry
+// ---- helper to guess device from UA for analytics ----
+function getDeviceType(userAgent = '') {
+  const ua = userAgent.toLowerCase();
+  if (/mobile/.test(ua)) return 'mobile';
+  if (/tablet|ipad/.test(ua)) return 'tablet';
+  if (/bot|crawler|spider/.test(ua)) return 'bot';
+  return 'desktop';
+}
+
+// REAL REDIRECT ENDPOINT + analytics logging
 app.get('/r/:slug', async (req, res) => {
   try {
     const { slug } = req.params;
@@ -204,7 +198,7 @@ app.get('/r/:slug', async (req, res) => {
 
     const now = new Date();
 
-    // EXPIRY CHECK
+    // expiry check
     if (link.expiresAt && now > link.expiresAt) {
       if (link.status !== 'expired') {
         link.status = 'expired';
@@ -215,14 +209,14 @@ app.get('/r/:slug', async (req, res) => {
         .send('Deadman-Link: This link has self-destructed (expired).');
     }
 
-    // SCHEDULED ACTIVATION CHECK
+    // schedule check
     if (link.scheduleStart && now < link.scheduleStart) {
       return res
         .status(403)
         .send('Deadman-Link: This link is not active yet.');
     }
 
-    // CLICK LIMIT CHECK
+    // click limit check
     const effectiveLimit = link.isOneTime ? 1 : link.maxClicks || 0;
     if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
       if (link.status !== 'expired') {
@@ -236,18 +230,42 @@ app.get('/r/:slug', async (req, res) => {
         );
     }
 
-    // Increment clicks
+    // increment clicks + possibly expire
     link.clicks += 1;
-
-    // If this click consumed the last allowed one, mark as expired
     if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
       link.status = 'expired';
     }
-
     await link.save();
 
-    // TODO: password & preview handling will be integrated in a smarter flow later.
-    // For now, this endpoint just redirects if rules allow.
+    // ---- log analytics event (non-blocking) ----
+    const ipRaw =
+      req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    const ip = Array.isArray(ipRaw)
+      ? ipRaw[0]
+      : ipRaw.split(',')[0].trim();
+
+    const userAgent = req.headers['user-agent'] || '';
+    const deviceType = getDeviceType(userAgent);
+
+    const country =
+      req.headers['cf-ipcountry'] ||
+      req.headers['x-country'] ||
+      'Unknown';
+
+    try {
+      await AnalyticsEvent.create({
+        link: link._id,
+        slug: link.slug,
+        ip,
+        userAgent,
+        deviceType,
+        country,
+      });
+    } catch (logErr) {
+      console.error('Failed to log analytics event:', logErr.message);
+      // do NOT block redirect
+    }
+
     return res.redirect(link.targetUrl);
   } catch (err) {
     console.error('Error in GET /r/:slug:', err);
@@ -255,6 +273,119 @@ app.get('/r/:slug', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`API server running on http://localhost:${PORT}`);
+// PUT /api/links/:id - update link details
+app.put('/api/links/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, targetUrl, password, isOneTime, maxClicks, expiresAt, showPreview, collection, creatorName } =
+      req.body || {};
+
+    const link = await Link.findById(id);
+    if (!link) {
+      return res.status(404).json({ message: 'Link not found' });
+    }
+
+    // Update allowed fields
+    if (title !== undefined) link.title = title;
+    if (targetUrl !== undefined) link.targetUrl = targetUrl;
+    if (password !== undefined)
+      link.password = password || null;
+    if (isOneTime !== undefined) link.isOneTime = !!isOneTime;
+    if (maxClicks !== undefined) link.maxClicks = maxClicks;
+    if (expiresAt !== undefined)
+      link.expiresAt = expiresAt ? new Date(expiresAt) : null;
+    if (showPreview !== undefined) link.showPreview = !!showPreview;
+    if (collection !== undefined) link.collection = collection;
+    if (creatorName !== undefined) link.creatorName = creatorName;
+
+    const updated = await link.save();
+    return res.status(200).json(updated);
+  } catch (err) {
+    console.error('Error in PUT /api/links/:id:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// PATCH /api/links/:id/favorite - toggle favorite status
+app.patch('/api/links/:id/favorite', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const link = await Link.findById(id);
+    if (!link) {
+      return res.status(404).json({ message: 'Link not found' });
+    }
+
+    link.isFavorite = !link.isFavorite;
+    const updated = await link.save();
+    return res.status(200).json(updated);
+  } catch (err) {
+    console.error('Error in PATCH /api/links/:id/favorite:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// DELETE /api/links/:id - delete a link
+app.delete('/api/links/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await Link.findByIdAndDelete(id);
+    if (!result) {
+      return res.status(404).json({ message: 'Link not found' });
+    }
+
+    return res.status(200).json({ message: 'Link deleted successfully' });
+  } catch (err) {
+    console.error('Error in DELETE /api/links/:id:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// ---------------- SOCKET.IO ---------------- //
+
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
+});
+
+io.on('connection', (socket) => {
+  console.log('🔌 Client connected:', socket.id);
+
+  socket.on('join-room', ({ roomCode, userName }) => {
+    socket.join(roomCode);
+    socket.data.roomCode = roomCode;
+    socket.data.userName = userName || 'Guest';
+
+    socket.to(roomCode).emit('user-joined', {
+      userName: socket.data.userName,
+    });
+  });
+
+  socket.on('player-action', (payload) => {
+    const { roomCode } = payload;
+    if (!roomCode) return;
+    socket.to(roomCode).emit('player-action', payload);
+  });
+
+  socket.on('chat-message', ({ roomCode, userName, message }) => {
+    if (!roomCode || !message?.trim()) return;
+
+    io.to(roomCode).emit('chat-message', {
+      userName: userName || socket.data.userName || 'Guest',
+      message,
+      ts: Date.now(),
+    });
+  });
+
+  socket.on('disconnect', () => {
+    console.log('🔌 Client disconnected:', socket.id);
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`API + Socket server running on http://localhost:${PORT}`);
 });

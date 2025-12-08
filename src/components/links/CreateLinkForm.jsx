@@ -9,6 +9,7 @@ import {
   Calendar,
   Eye,
   Tag,
+  User,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../../services/api';
@@ -21,6 +22,7 @@ export const CreateLinkForm = ({ onSuccess }) => {
     url: '',
     slug: '',
     title: '',
+    creatorName: '',
     password: '',
     isOneTime: false,
     maxClicks: 0,
@@ -66,6 +68,7 @@ export const CreateLinkForm = ({ onSuccess }) => {
         url: form.url, // ❗ backend expects `url`
         slug: form.slug || undefined,
         title: form.title || form.url,
+        creatorName: form.creatorName || 'Anonymous',
         password: form.password || undefined,
         isOneTime: form.isOneTime,
         maxClicks: normalizedMaxClicks,
@@ -151,6 +154,14 @@ export const CreateLinkForm = ({ onSuccess }) => {
               placeholder="Operation Blackbriar"
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
+            />
+
+            <Input
+              label="Creator Name (Optional)"
+              placeholder="Your name or team"
+              value={form.creatorName}
+              onChange={(e) => setForm({ ...form, creatorName: e.target.value })}
+              icon={<User className="w-4 h-4" />}
             />
 
             <div className="grid grid-cols-2 gap-4">

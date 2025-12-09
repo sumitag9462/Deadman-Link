@@ -1,147 +1,242 @@
+// src/pages/Admin/AuditLogs.jsx
 import React, { useEffect, useState } from 'react';
 import { Table } from '../../components/ui/Table';
-import { FileText, RefreshCcw } from 'lucide-react';
-import { Button } from '../../components/ui/Button';
 import api from '../../services/api';
+import { Input } from '../../components/ui/Input';
+import { Button } from '../../components/ui/Button';
+import { Filter, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+const ACTION_OPTIONS = [
+  { label: 'All Actions', value: '' },
+  { label: 'Create Link', value: 'CREATE_LINK' },
+  { label: 'Update Link', value: 'UPDATE_LINK' },
+  { label: 'Delete Link', value: 'DELETE_LINK' },
+  { label: 'Ban User', value: 'BAN_USER' },
+  { label: 'Unban User', value: 'UNBAN_USER' },
+  { label: 'Update Config', value: 'UPDATE_CONFIG' },
+  { label: 'System Event', value: 'SYSTEM_EVENT' },
+  { label: 'Login', value: 'LOGIN' },
+  { label: 'Logout', value: 'LOGOUT' },
+];
 
 const AuditLogs = () => {
   const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+
   const [page, setPage] = useState(1);
+  const [limit] = useState(20);
   const [totalPages, setTotalPages] = useState(1);
 
-  const fetchLogs = async (pageNum = 1) => {
+  const [actionFilter, setActionFilter] = useState('');
+  const [adminFilter, setAdminFilter] = useState('');
+  const [searchTarget, setSearchTarget] = useState('');
+
+  const loadLogs = async (opts = {}) => {
     try {
       setLoading(true);
-      const res = await api.get('/admin/audit-logs', {
-        params: { page: pageNum, limit: 50 }
-      });
-      
-      const formattedLogs = res.data.logs.map(log => {
-        const date = new Date(log.timestamp);
-        return {
-          id: log._id,
-          time: date.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-          }),
-          action: formatAction(log.action),
-          target: log.target,
-          admin: log.adminName || log.adminEmail,
-          ip: log.ip,
-        };
-      });
-      
-      setLogs(formattedLogs);
-      setPage(res.data.page);
-      setTotalPages(res.data.pages);
+
+      const params = {
+        page: opts.page ?? page,
+        limit,
+      };
+
+      if (actionFilter) params.action = actionFilter;
+      if (adminFilter.trim()) params.admin = adminFilter.trim();
+      if (searchTarget.trim()) params.search = searchTarget.trim();
+
+      const res = await api.get('/admin/audit-logs', { params });
+
+      setLogs(res.data.logs || []);
+      setPage(res.data.page || 1);
+      setTotalPages(res.data.totalPages || 1);
     } catch (err) {
-      console.error('Failed to fetch audit logs:', err);
+      console.error('Failed to load audit logs', err);
       toast.error('Failed to load audit logs');
     } finally {
       setLoading(false);
     }
   };
 
-  const formatAction = (action) => {
-    // Convert ACTION_NAME to Action Name
-    return action
-      .split('_')
-      .map(word => word.charAt(0) + word.slice(1).toLowerCase())
-      .join(' ');
+  useEffect(() => {
+    loadLogs({ page: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionFilter]);
+
+  const handleApplyFilters = () => {
+    loadLogs({ page: 1 });
   };
 
-  useEffect(() => {
-    fetchLogs();
-  }, []);
+  const handleResetFilters = () => {
+    setActionFilter('');
+    setAdminFilter('');
+    setSearchTarget('');
+    setPage(1);
+    // then reload
+    setTimeout(() => loadLogs({ page: 1 }), 0);
+  };
 
+  const handlePrev = () => {
+    if (page <= 1) return;
+    const nextPage = page - 1;
+    setPage(nextPage);
+    loadLogs({ page: nextPage });
+  };
+
+  const handleNext = () => {
+    if (page >= totalPages) return;
+    const nextPage = page + 1;
+    setPage(nextPage);
+    loadLogs({ page: nextPage });
+  };
+
+  // columns for your Table component
   const columns = [
-    { 
-      header: "Time", 
-      accessor: "time", 
-      className: "text-sm text-slate-300 whitespace-nowrap" 
+    {
+      header: 'Timestamp',
+      accessor: 'time',
+      className: 'font-mono text-xs text-slate-500',
     },
-    { 
-      header: "Action", 
-      accessor: "action", 
-      className: "font-semibold text-emerald-400" 
+    {
+      header: 'Action',
+      accessor: 'action',
+      className: 'font-bold text-white',
     },
-    { 
-      header: "Target", 
-      accessor: "target",
-      className: "text-slate-200" 
-    },
-    { 
-      header: "Admin", 
-      accessor: "admin", 
-      className: "text-blue-400" 
-    },
-    { 
-      header: "IP", 
-      accessor: "ip", 
-      className: "font-mono text-xs text-slate-500" 
-    },
+    { header: 'Target', accessor: 'target' },
+    { header: 'Admin', accessor: 'admin' },
+    { header: 'IP Address', accessor: 'ip', className: 'font-mono' },
   ];
 
+  // transform backend logs -> table rows
+  const tableData = logs.map((log) => ({
+    id: log._id,
+    time: new Date(log.createdAt).toLocaleString(),
+    action: log.action,
+    target: log.target,
+    admin: log.adminName || 'System',
+    ip: log.ipAddress || 'Unknown',
+  }));
+
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 relative">
-        <div>
-          <h1 className="text-4xl font-bold text-white mb-2">Audit Logs</h1>
-          <p className="text-lg text-slate-300">Track all administrative actions and system changes</p>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold text-white">
+          System Audit Logs
+        </h1>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => loadLogs({ page })}
+            disabled={loading}
+            className="flex items-center gap-1"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </Button>
         </div>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => fetchLogs(page)}
-          disabled={loading}
-        >
-          <RefreshCcw className="w-4 h-4 mr-2" />
-          Refresh
-        </Button>
-        <div className="absolute -top-4 -left-4 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl"></div>
       </div>
 
-      {loading && <p className="text-slate-400">Loading audit logs...</p>}
-      
-      {!loading && logs.length === 0 && (
-        <p className="text-slate-400">No audit logs found.</p>
-      )}
-      
-      {!loading && logs.length > 0 && (
-        <>
-          <Table columns={columns} data={logs} />
-          
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-4 mt-6">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => fetchLogs(page - 1)}
-                disabled={page === 1}
-              >
-                Previous
-              </Button>
-              <span className="text-slate-300">
-                Page {page} of {totalPages}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => fetchLogs(page + 1)}
-                disabled={page === totalPages}
-              >
-                Next
-              </Button>
-            </div>
-          )}
-        </>
-      )}
+      {/* Filters */}
+      <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
+        <div className="flex items-center gap-2 text-slate-300 text-sm">
+          <Filter className="w-4 h-4 text-emerald-400" />
+          <span>Filter logs</span>
+        </div>
+
+        <div className="grid md:grid-cols-4 gap-3">
+          <div className="md:col-span-1">
+            <label className="block text-xs text-slate-400 mb-1">
+              Action
+            </label>
+            <select
+              value={actionFilter}
+              onChange={(e) => setActionFilter(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            >
+              {ACTION_OPTIONS.map((opt) => (
+                <option key={opt.value || 'ALL'} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-span-1">
+            <Input
+              label="Admin"
+              placeholder="Admin name"
+              value={adminFilter}
+              onChange={(e) => setAdminFilter(e.target.value)}
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <Input
+              label="Target search"
+              placeholder="slug: free-money, user: someone@site.com, etc."
+              value={searchTarget}
+              onChange={(e) => setSearchTarget(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 justify-end">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleResetFilters}
+          >
+            Reset
+          </Button>
+          <Button size="sm" onClick={handleApplyFilters}>
+            Apply
+          </Button>
+        </div>
+      </div>
+
+      {/* Table + states */}
+      <div className="space-y-3">
+        {loading ? (
+          <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 text-sm">
+            Loading audit logs...
+          </div>
+        ) : tableData.length === 0 ? (
+          <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 text-sm">
+            No audit logs found for this filter.
+          </div>
+        ) : (
+          <Table columns={columns} data={tableData} />
+        )}
+
+        {/* Pagination */}
+        <div className="flex items-center justify-between text-xs text-slate-400 mt-2">
+          <span>
+            Page {page} of {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handlePrev}
+              disabled={page <= 1 || loading}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleNext}
+              disabled={page >= totalPages || loading}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
+
 export default AuditLogs;

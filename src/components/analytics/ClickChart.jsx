@@ -1,90 +1,110 @@
+// src/components/analytics/ClickChart.jsx
 import React from 'react';
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Area,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  ReferenceLine,
+} from 'recharts';
 import { Card } from '../ui/Card';
 
-export const ClickChart = ({ data }) => {
-  // Mock data generator if none provided
-  const chartData = data || [45, 72, 48, 95, 110, 85, 130];
-  const max = Math.max(...chartData);
-  const min = 0;
-  const range = max - min;
+export const ClickChart = ({ data = [], loading }) => {
+  // Normalize API data → recharts data
+  const chartData = (data || []).map((point) => ({
+    date: point.date ? point.date.slice(5) : '',
+    clicks: typeof point.clicks === 'number' ? point.clicks : 0,
+  }));
 
-  // Calculate polyline points
-  const points = chartData.map((val, index) => {
-    const x = (index / (chartData.length - 1)) * 100;
-    const y = 100 - ((val - min) / range) * 80; // keep some padding top/bottom
-    return `${x},${y}`;
-  }).join(' ');
+  const hasData = chartData.length > 0;
 
   return (
-    <Card className="p-6 border-slate-800 bg-slate-900 h-full">
-      <div className="flex items-center justify-between mb-6">
-        <h3 className="text-lg font-semibold text-white">Signal Activity</h3>
-        <select className="bg-slate-950 border border-slate-800 text-xs text-slate-400 rounded px-2 py-1">
-          <option>Last 7 Days</option>
-          <option>Last 30 Days</option>
-        </select>
-      </div>
-
-      <div className="relative h-64 w-full">
-        {/* Grid Lines */}
-        <div className="absolute inset-0 flex flex-col justify-between text-xs text-slate-600">
-            {[100, 75, 50, 25, 0].map(p => (
-                <div key={p} className="border-b border-slate-800/50 w-full h-0 relative">
-                    <span className="absolute -top-3 right-0">{Math.round(max * (p/100))}</span>
-                </div>
-            ))}
+    <Card className="bg-slate-900 border-slate-800 h-full flex flex-col">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+          Clicks Over Time
         </div>
-
-        {/* The Chart */}
-        <svg className="absolute inset-0 w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100">
-            {/* Gradient Area */}
-            <defs>
-                <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity="0.2" />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
-                </linearGradient>
-            </defs>
-            <polygon 
-                points={`0,100 ${points} 100,100`} 
-                fill="url(#chartGradient)" 
-            />
-            {/* The Line */}
-            <polyline 
-                points={points} 
-                fill="none" 
-                stroke="#10b981" 
-                strokeWidth="2" 
-                vectorEffect="non-scaling-stroke"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            />
-            {/* Dots */}
-            {chartData.map((val, index) => {
-                 const x = (index / (chartData.length - 1)) * 100;
-                 const y = 100 - ((val - min) / range) * 80;
-                 return (
-                    <circle 
-                        key={index} 
-                        cx={x} 
-                        cy={y} 
-                        r="1.5" 
-                        className="fill-slate-950 stroke-emerald-500 stroke-2 hover:r-4 transition-all cursor-pointer"
-                        vectorEffect="non-scaling-stroke"
-                    >
-                        <title>{val} clicks</title>
-                    </circle>
-                 );
-            })}
-        </svg>
+        <span className="text-[10px] text-slate-500">Last 7 days</span>
       </div>
-      <div className="flex justify-between text-xs text-slate-500 mt-4 px-1">
-          <span>Mon</span>
-          <span>Tue</span>
-          <span>Wed</span>
-          <span>Thu</span>
-          <span>Fri</span>
-          <span>Sat</span>
-          <span>Sun</span>
+
+      <div className="flex-1">
+        {loading ? (
+          <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+            Loading analytics…
+          </div>
+        ) : !hasData ? (
+          <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+            No click data yet. Share a link to start the feed.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart
+              data={chartData}
+              margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+            >
+              <defs>
+                <linearGradient id="clicksGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.65} />
+                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+
+              <XAxis
+                dataKey="date"
+                stroke="#6b7280"
+                tickLine={false}
+                tickMargin={8}
+                fontSize={10}
+              />
+              <YAxis
+                stroke="#6b7280"
+                tickLine={false}
+                tickMargin={8}
+                fontSize={10}
+                allowDecimals={false}
+                domain={[0, (dataMax) => Math.max(dataMax, 5)]}
+              />
+
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#020617',
+                  border: '1px solid #1f2937',
+                  fontSize: 12,
+                }}
+                labelStyle={{ color: '#9ca3af' }}
+                formatter={(value) => [`${value} clicks`, '']}
+              />
+
+              <ReferenceLine y={0} stroke="#1f2937" />
+
+              {/* teammate’s bars + your data */}
+              <Bar
+                dataKey="clicks"
+                barSize={14}
+                radius={[4, 4, 0, 0]}
+                fill="#16a34a"
+                opacity={0.35}
+              />
+
+              {/* your area line + improved dots */}
+              <Area
+                type="monotone"
+                dataKey="clicks"
+                stroke="#22c55e"
+                fill="url(#clicksGradient)"
+                strokeWidth={2.4}
+                dot={{ r: 3, fill: '#22c55e', stroke: '#0f172a', strokeWidth: 1 }}
+                activeDot={{ r: 5 }}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </Card>
   );

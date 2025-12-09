@@ -125,7 +125,7 @@ const LandingPage = () => {
           
           <h1 className="text-5xl md:text-7xl font-bold text-white tracking-tight mb-6 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100 leading-tight">
             Intelligent Links That <br />
-            <span className="glitch-text text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-500" data-text="Self-Destruct & Adapt">
+            <span className="glitch-text text-transparent bg-clip-text bg-linear-to-r from-emerald-400 to-cyan-500" data-text="Self-Destruct & Adapt">
               Self-Destruct & Adapt.
             </span>
           </h1>
@@ -152,8 +152,8 @@ const LandingPage = () => {
       {/* --- User Features Grid (3D Cards) --- */}
       <section id="features" className="py-24 px-6 bg-slate-900/30 border-y border-slate-800/50 relative">
         {/* Decorative Lines */}
-        <div className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-slate-800 to-transparent opacity-50"></div>
-        <div className="absolute top-0 right-1/4 w-px h-full bg-gradient-to-b from-transparent via-slate-800 to-transparent opacity-50"></div>
+        <div className="absolute top-0 left-1/4 w-px h-full bg-linear-to-b from-transparent via-slate-800 to-transparent opacity-50"></div>
+        <div className="absolute top-0 right-1/4 w-px h-full bg-linear-to-b from-transparent via-slate-800 to-transparent opacity-50"></div>
 
         <div className="max-w-7xl mx-auto relative z-10">
           <div className="text-center mb-16">
@@ -280,7 +280,7 @@ const LandingPage = () => {
 const FeatureCard = ({ icon: Icon, title, desc, color, bg }) => (
   <div className="card-3d p-6 rounded-xl bg-slate-900 border border-slate-800 hover:border-emerald-500/30 relative overflow-hidden group">
     {/* Glow effect on hover */}
-    <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
+    <div className="absolute inset-0 bg-linear-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
     
     <div className={`w-14 h-14 rounded-xl border border-slate-800 flex items-center justify-center mb-4 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3 ${bg}`}>
       <Icon className={`w-7 h-7 ${color}`} />

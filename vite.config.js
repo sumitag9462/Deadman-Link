@@ -1,13 +1,11 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [
-    react({
-      babel: {
-        plugins: [['babel-plugin-react-compiler']],
-      },
-    }),
-  ],
-})
+  plugins: [react()],
+  server: {
+    host: '0.0.0.0',   // allow LAN access e.g. 192.168.x.x
+    port: 5173,        // 👈 change back to 5173
+    strictPort: true,
+  },
+});

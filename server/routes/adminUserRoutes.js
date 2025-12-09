@@ -1,6 +1,6 @@
 // server/routes/adminUserRoutes.js
 const express = require('express');
-const AdminUser = require('../models/AdminUser');
+const User = require('../models/User');
 const { auditLogger } = require('../middleware/auditLogger');
 
 const router = express.Router();
@@ -8,24 +8,14 @@ const router = express.Router();
 // Role → features mapping (single source of truth)
 const ROLE_DEFINITIONS = [
   {
-    id: 'regular',
-    label: 'Regular',
-    description: 'Safe default for most users.',
+    id: 'user',
+    label: 'User',
+    description: 'Standard user with full application access.',
     features: [
       'Create Deadman Links',
-      'Basic link analytics',
+      'Link analytics & insights',
       'Join Watch Parties',
-    ],
-  },
-  {
-    id: 'premium',
-    label: 'Premium',
-    description: 'Power users with extended capabilities.',
-    features: [
-      'Everything in Regular',
-      'Advanced analytics & geo insights',
-      'Link collections & favorites',
-      'Instant link shortening',
+      'Manage own content',
     ],
   },
   {
@@ -33,21 +23,33 @@ const ROLE_DEFINITIONS = [
     label: 'Admin',
     description: 'Full operational and audit access.',
     features: [
-      'Everything in Premium',
+      'Everything in User',
       'Access Admin Console',
-      'Manage links & users',
+      'Manage all links & users',
       'View audit logs & system config',
+      'Ban/unban users',
     ],
   },
 ];
 
 /**
  * GET /api/admin/users
- * Optional query: ?search=...&role=regular|premium|admin&status=active|banned
+ * Optional query: ?search=...&role=user|admin&status=active|banned
  */
 router.get('/', async (req, res) => {
   try {
-    const { search = '', role, status } = req.query;
+    // Ensure MongoDB is connected
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState !== 1) {
+      console.log('⏳ Waiting for MongoDB connection...');
+      await new Promise(resolve => {
+        if (mongoose.connection.readyState === 1) resolve();
+        else mongoose.connection.once('open', resolve);
+      });
+    }
+
+    const { search = '', role, onlineStatus, accountStatus } = req.query;
+    console.log('📊 User filter request:', { search, role, onlineStatus, accountStatus });
 
     const q = {};
 
@@ -56,15 +58,45 @@ router.get('/', async (req, res) => {
       q.$or = [{ name: regex }, { email: regex }];
     }
 
-    if (role && ['regular', 'premium', 'admin'].includes(role)) {
+    if (role && ['user', 'admin'].includes(role)) {
       q.role = role;
+      console.log('✅ Role filter applied:', role);
     }
 
-    if (status && ['active', 'banned'].includes(status)) {
-      q.status = status;
+    if (onlineStatus && ['online', 'idle', 'offline'].includes(onlineStatus)) {
+      q.onlineStatus = onlineStatus;
+      console.log('✅ Online status filter applied:', onlineStatus);
     }
 
-    const users = await AdminUser.find(q).sort({ name: 1 });
+    if (accountStatus && ['active', 'banned'].includes(accountStatus)) {
+      q.status = accountStatus;
+      console.log('✅ Account status filter applied:', accountStatus);
+    }
+
+    console.log('📊 Final MongoDB query:', JSON.stringify(q));
+
+    const users = await User.find(q)
+      .select('-password') // Don't send password hashes
+      .sort({ lastActiveAt: -1, createdAt: -1 }); // Most recently active first
+
+    console.log('📊 Found', users.length, 'users matching query');
+    if (users.length > 0) {
+      console.log('Sample user:', {
+        name: users[0].name,
+        role: users[0].role,
+        status: users[0].status,
+        onlineStatus: users[0].onlineStatus
+      });
+    } else {
+      console.log('❌ No users found. Let me check what exists in DB...');
+      const allUsers = await User.find().select('name role status onlineStatus').limit(3);
+      console.log('First 3 users in DB:', allUsers.map(u => ({ 
+        name: u.name, 
+        role: u.role, 
+        status: u.status, 
+        onlineStatus: u.onlineStatus 
+      })));
+    }
 
     res.json({ users });
   } catch (err) {
@@ -81,45 +113,7 @@ router.get('/roles', (req, res) => {
   res.json({ roles: ROLE_DEFINITIONS });
 });
 
-/**
- * POST /api/admin/users
- * Create an admin-visible user (you can use this from other flows too)
- */
-router.post('/', async (req, res) => {
-  try {
-    const { name, email, role = 'regular', status = 'active' } =
-      req.body || {};
-
-    if (!name || !email) {
-      return res
-        .status(400)
-        .json({ message: 'name and email are required' });
-    }
-
-    const existing = await AdminUser.findOne({ email });
-    if (existing) {
-      return res.status(409).json({ message: 'User already exists' });
-    }
-
-    const user = await AdminUser.create({
-      name,
-      email,
-      role,
-      status,
-      lastLoginAt: null,
-    });
-
-    const io = req.app.get('io');
-    if (io) {
-      io.emit('admin:user-added', user);
-    }
-
-    res.status(201).json(user);
-  } catch (err) {
-    console.error('Error in POST /api/admin/users:', err);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
+// POST endpoint removed - users are created through registration only
 
 /**
  * PATCH /api/admin/users/:id
@@ -132,7 +126,7 @@ router.patch('/:id', async (req, res) => {
 
     const update = {};
 
-    if (role && ['regular', 'premium', 'admin'].includes(role)) {
+    if (role && ['user', 'admin'].includes(role)) {
       update.role = role;
     }
 
@@ -146,11 +140,11 @@ router.patch('/:id', async (req, res) => {
         .json({ message: 'No valid fields provided to update.' });
     }
 
-    const updated = await AdminUser.findByIdAndUpdate(
+    const updated = await User.findByIdAndUpdate(
       id,
       { $set: update },
       { new: true }
-    );
+    ).select('-password');
 
     if (!updated) {
       return res.status(404).json({ message: 'User not found' });

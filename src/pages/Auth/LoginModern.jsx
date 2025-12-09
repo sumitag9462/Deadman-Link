@@ -36,6 +36,12 @@ const Login = () => {
         duration: 5000,
         icon: '🔐'
       });
+    } else if (error === 'account_banned') {
+      setErrorMessage('🚫 Your account has been banned. Please contact support for assistance.');
+      toast.error('Your account has been banned. Please contact support.', {
+        duration: 6000,
+        icon: '🚫'
+      });
     }
   }, [searchParams]);
 

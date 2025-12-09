@@ -28,10 +28,10 @@ function signToken(user) {
 	);
 }
 
-// POST /api/auth/register/initiate { name, email, password, role? }
+// POST /api/auth/register/initiate { name, email, password, role?, adminSecretKey? }
 router.post('/register/initiate', async (req, res) => {
 	try {
-		const { name, email, password, role } = req.body;
+		const { name, email, password, role, adminSecretKey } = req.body;
 
 		if (!name || !email || !password) {
 			return res.status(400).json({ message: 'All fields required' });
@@ -41,6 +41,20 @@ router.post('/register/initiate', async (req, res) => {
 			return res
 				.status(400)
 				.json({ message: 'Password must be at least 6 characters' });
+		}
+
+		// Validate admin secret key if attempting admin registration
+		if (role === 'admin') {
+			const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY;
+			if (!ADMIN_SECRET) {
+				console.error('⚠️ ADMIN_SECRET_KEY not configured in .env');
+				return res.status(500).json({ message: 'Admin registration not configured' });
+			}
+			if (!adminSecretKey || adminSecretKey !== ADMIN_SECRET) {
+				console.log('🚫 Invalid admin secret key attempt for:', email);
+				return res.status(403).json({ message: 'Invalid admin secret key' });
+			}
+			console.log('✅ Valid admin secret key provided for:', email);
 		}
 
 		const existing = await User.findOne({ email });
@@ -96,7 +110,7 @@ router.post('/register/verify', async (req, res) => {
 			return res.status(401).json({ message: 'Code expired' });
 		}
 
-		const { name, passwordHash } = otpRecord.meta || {};
+		const { name, passwordHash, role } = otpRecord.meta || {};
 		if (!name || !passwordHash) {
 			await OTP.deleteOne({ _id: otpRecord._id });
 			return res.status(400).json({ message: 'Registration data missing' });
@@ -112,6 +126,7 @@ router.post('/register/verify', async (req, res) => {
 			name,
 			email,
 			password: passwordHash,
+			role: role || 'user', // Use role from OTP meta
 		});
 
 		await OTP.deleteOne({ _id: otpRecord._id });
@@ -191,6 +206,8 @@ router.post('/login', async (req, res) => {
 		}
 
 		user.lastLoginAt = new Date();
+		user.onlineStatus = 'online'; // Set online on login
+		user.lastActiveAt = new Date();
 		await user.save();
 
 		const token = signToken(user);
@@ -392,6 +409,10 @@ router.get('/google/callback', (req, res, next) => {
 				console.log('🔐 Admin using user login - redirecting with error');
 				console.log('📍 Redirect URL:', `${FRONTEND_URL}/login?error=use_admin_login`);
 				return res.redirect(`${FRONTEND_URL}/login?error=use_admin_login`);
+			}
+			if (info?.message === 'account_banned') {
+				console.log('🚫 Banned user attempted OAuth login - redirecting with error');
+				return res.redirect(`${FRONTEND_URL}/login?error=account_banned`);
 			}
 			console.error('Google OAuth: no user returned');
 			return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed`);

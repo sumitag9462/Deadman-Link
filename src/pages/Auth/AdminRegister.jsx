@@ -9,7 +9,7 @@ import toast from 'react-hot-toast';
 import api from '../../services/api';
 
 const AdminRegister = () => {
-  const [formData, setFormData] = useState({ name: '', email: '', password: '' });
+  const [formData, setFormData] = useState({ name: '', email: '', password: '', adminSecretKey: '' });
   const [code, setCode] = useState('');
   const [stage, setStage] = useState('form'); // form -> otp
   const [loading, setLoading] = useState(false);
@@ -34,10 +34,10 @@ const AdminRegister = () => {
     e.preventDefault();
     setErrorMessage(''); // Clear previous errors
 
-    if (!formData.name || !formData.email || !formData.password) {
-      const message = '⚠️ All fields required for clearance';
+    if (!formData.name || !formData.email || !formData.password || !formData.adminSecretKey) {
+      const message = '⚠️ All fields required for admin clearance';
       setErrorMessage(message);
-      toast.error('All fields required for clearance');
+      toast.error('All fields required for admin clearance');
       return;
     }
 
@@ -192,6 +192,23 @@ const AdminRegister = () => {
                 className="font-mono bg-black/50 border-red-900/50 text-red-100"
                 required
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono text-red-400/80 mb-2 uppercase tracking-wider">
+                🔑 Admin Secret Key (Required)
+              </label>
+              <Input
+                type="password"
+                placeholder="Enter secret admin authorization key"
+                value={formData.adminSecretKey}
+                onChange={(e) => setFormData({ ...formData, adminSecretKey: e.target.value })}
+                className="font-mono bg-black/50 border-red-900/50 text-red-100 placeholder:text-slate-700"
+                required
+              />
+              <p className="mt-1 text-[10px] text-red-500/60 font-mono">
+                ⚠ Only authorized personnel have this key
+              </p>
             </div>
 
             <Button 

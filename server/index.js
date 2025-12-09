@@ -9,6 +9,7 @@ require('dotenv').config();
 const watchRoutes = require('./routes/watchRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const Link = require('./models/Link');
+const User = require('./models/User');
 const AnalyticsEvent = require('./models/AnalyticsEvent');
 const adminRoutes = require('./routes/adminRoutes');
 const adminLinkRoutes = require('./routes/adminLinkRoutes');
@@ -460,8 +461,104 @@ const io = new Server(server, {
 app.set('io', io);
 
 
+// Track user activity
+const activeUsers = new Map(); // userId -> { socketId, lastActivity }
+
+// Check for idle/offline users every 30 seconds
+setInterval(async () => {
+  const now = Date.now();
+  const IDLE_THRESHOLD = 2 * 60 * 1000; // 2 minutes
+  const OFFLINE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+
+  for (const [userId, data] of activeUsers.entries()) {
+    const timeSinceActivity = now - data.lastActivity;
+
+    try {
+      if (timeSinceActivity > OFFLINE_THRESHOLD) {
+        // User is offline
+        await User.findByIdAndUpdate(userId, { onlineStatus: 'offline' });
+        activeUsers.delete(userId);
+        console.log('⚫ User went offline:', userId);
+      } else if (timeSinceActivity > IDLE_THRESHOLD) {
+        // User is idle
+        const user = await User.findById(userId);
+        if (user && user.onlineStatus !== 'idle') {
+          await User.findByIdAndUpdate(userId, { onlineStatus: 'idle' });
+          console.log('🟡 User went idle:', userId);
+        }
+      }
+    } catch (err) {
+      console.error('Error updating user status:', err);
+    }
+  }
+}, 30000);
+
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
+
+  // User authentication and status tracking
+  socket.on('user-connected', async ({ userId, userName }) => {
+    if (!userId) return;
+    
+    socket.data.userId = userId;
+    socket.data.userName = userName;
+    activeUsers.set(userId, { socketId: socket.id, lastActivity: Date.now() });
+
+    try {
+      await User.findByIdAndUpdate(userId, {
+        onlineStatus: 'online',
+        lastActiveAt: new Date(),
+      });
+      console.log('🟢 User online:', userId, userName);
+      
+      // Notify admins about user status change
+      io.emit('admin:user-updated', await User.findById(userId).select('-password'));
+    } catch (err) {
+      console.error('Error updating user status:', err);
+    }
+  });
+
+  // Heartbeat to keep user active
+  socket.on('user-heartbeat', async ({ userId }) => {
+    if (!userId) return;
+    
+    const userData = activeUsers.get(userId);
+    if (userData) {
+      userData.lastActivity = Date.now();
+      activeUsers.set(userId, userData);
+    }
+
+    try {
+      // Update to online if they were idle
+      const user = await User.findById(userId);
+      if (user && user.onlineStatus !== 'online') {
+        await User.findByIdAndUpdate(userId, {
+          onlineStatus: 'online',
+          lastActiveAt: new Date(),
+        });
+        io.emit('admin:user-updated', await User.findById(userId).select('-password'));
+      }
+    } catch (err) {
+      console.error('Error processing heartbeat:', err);
+    }
+  });
+
+  // User activity (any interaction)
+  socket.on('user-activity', async ({ userId }) => {
+    if (!userId) return;
+
+    const userData = activeUsers.get(userId);
+    if (userData) {
+      userData.lastActivity = Date.now();
+      activeUsers.set(userId, userData);
+    }
+
+    try {
+      await User.findByIdAndUpdate(userId, { lastActiveAt: new Date() });
+    } catch (err) {
+      console.error('Error updating last active:', err);
+    }
+  });
 
   socket.on('join-room', ({ roomCode, userName }) => {
     socket.join(roomCode);
@@ -489,8 +586,19 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log('🔌 Client disconnected:', socket.id);
+    
+    const userId = socket.data.userId;
+    if (userId) {
+      // Don't immediately set to offline - let the interval handle it
+      // This allows for reconnections without status flicker
+      const userData = activeUsers.get(userId);
+      if (userData) {
+        userData.lastActivity = Date.now() - (4 * 60 * 1000); // Set to 4 mins ago so they go offline in next check
+        activeUsers.set(userId, userData);
+      }
+    }
   });
 });
 

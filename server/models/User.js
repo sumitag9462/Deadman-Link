@@ -7,6 +7,9 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true },
     password: { type: String, required: false },
     role: { type: String, enum: ['user', 'admin'], default: 'user' },
+    status: { type: String, enum: ['active', 'banned'], default: 'active' }, // Account status
+    onlineStatus: { type: String, enum: ['online', 'idle', 'offline'], default: 'offline' }, // Connection status
+    lastActiveAt: { type: Date, default: null }, // Last activity timestamp
     lastLoginAt: { type: Date, default: null },
     authProvider: { type: String, enum: ['local', 'google'], default: 'local' },
     providerId: { type: String, default: null },

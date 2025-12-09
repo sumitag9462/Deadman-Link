@@ -34,6 +34,11 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
               return done(null, false, { message: 'no_account' });
             }
             console.log('👤 User found with role:', user.role);
+            // Check if user is banned
+            if (user.status === 'banned') {
+              console.log('🚫 Banned user attempted OAuth login:', email);
+              return done(null, false, { message: 'account_banned' });
+            }
             // Block admins from using user login page
             if (user.role === 'admin') {
               console.log('🚫 Admin detected using user login - blocking');
@@ -71,8 +76,15 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
                 password: null,
                 role: 'admin',
               });
-            } else if (user.role !== 'admin') {
-              return done(null, false, { message: 'not_admin' });
+            } else {
+              // Check if user is banned
+              if (user.status === 'banned') {
+                console.log('🚫 Banned admin attempted OAuth login:', email);
+                return done(null, false, { message: 'account_banned' });
+              }
+              if (user.role !== 'admin') {
+                return done(null, false, { message: 'not_admin' });
+              }
             }
             user.lastLoginAt = new Date();
             await user.save();

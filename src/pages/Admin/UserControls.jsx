@@ -1,5 +1,5 @@
 // src/pages/Admin/UserControls.jsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Shield, UserX, Search, ChevronDown } from 'lucide-react';
 import api from '../../services/api';
 import { Card } from '../../components/ui/Card';
@@ -9,12 +9,17 @@ import toast from 'react-hot-toast';
 import { adminSocket } from '../../services/adminSocket';
 
 const ROLE_COLORS = {
-  regular: 'bg-slate-700/60 text-slate-100',
-  premium: 'bg-indigo-500/20 text-indigo-300',
-  admin: 'bg-emerald-500/20 text-emerald-300',
+  user: 'bg-slate-700/60 text-slate-100 border-slate-600',
+  admin: 'bg-emerald-500/20 text-emerald-300 border-emerald-600/50',
 };
 
-const STATUS_COLORS = {
+const ONLINE_STATUS_COLORS = {
+  online: 'text-emerald-400 bg-emerald-400/10',
+  idle: 'text-yellow-400 bg-yellow-400/10',
+  offline: 'text-slate-400 bg-slate-400/10',
+};
+
+const ACCOUNT_STATUS_COLORS = {
   active: 'text-emerald-400',
   banned: 'text-red-400',
 };
@@ -24,20 +29,24 @@ const UserControls = () => {
   const [rolesMeta, setRolesMeta] = useState([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [onlineStatusFilter, setOnlineStatusFilter] = useState('');
+  const [accountStatusFilter, setAccountStatusFilter] = useState('');
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState(null);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/admin/users', {
-        params: {
-          search: search || undefined,
-          role: roleFilter || undefined,
-          status: statusFilter || undefined,
-        },
-      });
+      const params = {
+        search: search || undefined,
+        role: roleFilter || undefined,
+        onlineStatus: onlineStatusFilter || undefined,
+        accountStatus: accountStatusFilter || undefined,
+      };
+      console.log('🔍 Fetching users with params:', params);
+      
+      const res = await api.get('/admin/users', { params });
+      console.log('✅ Received users:', res.data.users?.length || 0);
       setUsers(res.data.users || []);
     } catch (err) {
       console.error('Error fetching admin users:', err);
@@ -47,7 +56,7 @@ const UserControls = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [search, roleFilter, onlineStatusFilter, accountStatusFilter]);
 
   const fetchRolesMeta = async () => {
     try {
@@ -94,6 +103,11 @@ const UserControls = () => {
     fetchUsers();
   };
 
+  // Fetch users when filters change
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
   const handleRoleChange = async (id, newRole) => {
     try {
       setSavingId(id);
@@ -114,7 +128,7 @@ const UserControls = () => {
     }
   };
 
-  const handleStatusToggle = async (id) => {
+  const handleAccountStatusToggle = async (id) => {
     const user = users.find((u) => u._id === id);
     if (!user) return;
 
@@ -129,12 +143,12 @@ const UserControls = () => {
         prev.map((u) => (u._id === id ? res.data : u))
       );
       toast.success(
-        nextStatus === 'active' ? 'User reactivated' : 'User banned'
+        nextStatus === 'active' ? 'User account reactivated' : 'User account banned'
       );
     } catch (err) {
-      console.error('Error toggling status:', err);
+      console.error('Error toggling account status:', err);
       toast.error(
-        err.response?.data?.message || 'Failed to update status'
+        err.response?.data?.message || 'Failed to update account status'
       );
     } finally {
       setSavingId(null);
@@ -190,28 +204,32 @@ const UserControls = () => {
               <select
                 className="bg-slate-800/80 border border-slate-600/50 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 transition-all"
                 value={roleFilter}
-                onChange={(e) => {
-                  setRoleFilter(e.target.value);
-                  setTimeout(fetchUsers, 0);
-                }}
+                onChange={(e) => setRoleFilter(e.target.value)}
               >
                 <option value="">All Roles</option>
-                <option value="regular">Regular</option>
-                <option value="premium">Premium</option>
+                <option value="user">User</option>
                 <option value="admin">Admin</option>
               </select>
 
               <select
-                className="bg-white/5 border border-slate-200/10 rounded-md px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-emerald-500"
-                value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value);
-                  setTimeout(fetchUsers, 0);
-                }}
+                className="bg-slate-800/80 border border-slate-600/50 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 transition-all"
+                value={onlineStatusFilter}
+                onChange={(e) => setOnlineStatusFilter(e.target.value)}
               >
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="banned">Banned</option>
+                <option value="">All Activity</option>
+                <option value="online">🟢 Online</option>
+                <option value="idle">🟡 Idle</option>
+                <option value="offline">⚫ Offline</option>
+              </select>
+
+              <select
+                className="bg-slate-800/80 border border-slate-600/50 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 transition-all"
+                value={accountStatusFilter}
+                onChange={(e) => setAccountStatusFilter(e.target.value)}
+              >
+                <option value="">All Accounts</option>
+                <option value="active">✅ Active</option>
+                <option value="banned">🚫 Banned</option>
               </select>
 
               <Button type="submit" size="sm" disabled={loading}>
@@ -231,8 +249,7 @@ const UserControls = () => {
 
               {!loading && users.length === 0 && (
                 <div className="py-6 text-center text-sm text-slate-500">
-                  No users found. Add admin users to the database to
-                  manage access.
+                  No users found. Try adjusting your filters or wait for new users to register.
                 </div>
               )}
 
@@ -243,8 +260,15 @@ const UserControls = () => {
                     className="flex items-center justify-between px-4 py-3 hover:bg-slate-900/60"
                   >
                     <div>
-                      <div className="text-sm font-medium text-slate-100">
-                        {user.name}
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-medium text-slate-100">
+                          {user.name}
+                        </div>
+                        {user.authProvider === 'google' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            Google
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-slate-400">
                         {user.email}
@@ -265,32 +289,53 @@ const UserControls = () => {
                               handleRoleChange(user._id, e.target.value)
                             }
                             className={
-                              'appearance-none bg-slate-900/80 border border-slate-700 rounded-lg px-3 py-1.5 pr-7 text-xs font-medium ' +
+                              'appearance-none bg-slate-900/80 border rounded-lg px-3 py-1.5 pr-7 text-xs font-medium transition-colors ' +
                               (ROLE_COLORS[user.role] ||
-                                'bg-slate-800 text-slate-100')
+                                'bg-slate-800 text-slate-100 border-slate-700')
                             }
                           >
-                            <option value="regular">Regular</option>
-                            <option value="premium">Premium</option>
+                            <option value="user">User</option>
                             <option value="admin">Admin</option>
                           </select>
                           <ChevronDown className="w-3 h-3 text-slate-400 absolute right-2 pointer-events-none" />
                         </div>
                       </div>
 
-                      {/* Status */}
+                      {/* Online Status */}
                       <div className="flex flex-col items-start">
                         <span className="text-[11px] text-slate-500 mb-1">
-                          Status
+                          Activity
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={
+                              'w-2 h-2 rounded-full ' +
+                              (user.onlineStatus === 'online'
+                                ? 'bg-emerald-400 animate-pulse'
+                                : user.onlineStatus === 'idle'
+                                ? 'bg-yellow-400'
+                                : 'bg-slate-500')
+                            }
+                          />
+                          <span className="text-xs text-slate-300 capitalize">
+                            {user.onlineStatus || 'offline'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Account Status (Ban/Unban) */}
+                      <div className="flex flex-col items-start">
+                        <span className="text-[11px] text-slate-500 mb-1">
+                          Account
                         </span>
                         <button
-                          onClick={() => handleStatusToggle(user._id)}
+                          onClick={() => handleAccountStatusToggle(user._id)}
                           disabled={savingId === user._id}
-                          className="inline-flex items-center gap-1 text-xs"
+                          className="inline-flex items-center gap-1 text-xs hover:opacity-80 transition-opacity"
                         >
                           <span
                             className={
-                              STATUS_COLORS[user.status] ||
+                              ACCOUNT_STATUS_COLORS[user.status] ||
                               'text-slate-300'
                             }
                           >

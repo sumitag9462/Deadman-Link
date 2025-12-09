@@ -1,6 +1,7 @@
 // server/routes/adminLinkRoutes.js
 const express = require('express');
 const Link = require('../models/Link');
+const { auditLogger } = require('../middleware/auditLogger');
 const { logAuditEvent } = require('../scripts/auditLogger');
 const { basicUrlSafetyCheck } = require('../scripts/urlSafety'); // ⬅️ add this
 
@@ -102,7 +103,9 @@ router.get('/', async (req, res) => {
 /**
  * PATCH /api/admin/links/:id
  */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', 
+  auditLogger('BLOCK_LINK', (req, data) => `slug: ${data.slug || req.params.id}`),
+  async (req, res) => {
   try {
     const { id } = req.params;
     const { status, maxClicks } = req.body;
@@ -229,7 +232,9 @@ router.post('/bulk-moderate', async (req, res) => {
 /**
  * DELETE /api/admin/links/:id
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id',
+  auditLogger('DELETE_LINK', (req) => `link ID: ${req.params.id}`),
+  async (req, res) => {
   try {
     const { id } = req.params;
 

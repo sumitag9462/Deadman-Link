@@ -23,22 +23,22 @@ export const ClickChart = ({ data = [], loading }) => {
   const hasData = chartData.length > 0;
 
   return (
-    <Card className="bg-slate-900 border-slate-800 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
-          Clicks Over Time
-        </div>
-        <span className="text-[10px] text-slate-500">Last 7 days</span>
+    <Card className="h-[400px] flex flex-col">
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-base font-semibold text-white">
+          Click Activity
+        </h3>
+        <span className="text-xs text-slate-500">Last 7 days</span>
       </div>
 
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
         {loading ? (
-          <div className="h-full flex items-center justify-center text-slate-500 text-sm">
-            Loading analytics…
+          <div className="h-full flex items-center justify-center text-slate-400 text-sm">
+            Loading chart data...
           </div>
         ) : !hasData ? (
           <div className="h-full flex items-center justify-center text-slate-500 text-sm">
-            No click data yet. Share a link to start the feed.
+            No data available yet
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">

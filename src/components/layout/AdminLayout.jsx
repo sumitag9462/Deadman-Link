@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { LayoutDashboard, Users, ShieldAlert, Settings, FileText, LogOut, Shield } from 'lucide-react';
+import { LayoutDashboard, Users, ShieldAlert, Settings, FileText, LogOut, Shield, Flag } from 'lucide-react';
 import { cn } from '../../utils/cn';
 
 const SidebarItem = ({ icon: Icon, label, to, active }) => (
@@ -41,8 +41,10 @@ const AdminLayout = () => {
                 <SidebarItem icon={Users} label="User Controls" to="/admin/users" active={location.pathname === '/admin/users'} />
             </div>
             <div>
-                <p className="px-3 text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Audit</p>
+                <p className="px-3 text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Security & Audit</p>
+                <SidebarItem icon={Flag} label="Moderation Queue" to="/admin/moderation" active={location.pathname === '/admin/moderation'} />
                 <SidebarItem icon={FileText} label="Audit Logs" to="/admin/logs" active={location.pathname === '/admin/logs'} />
+                <SidebarItem icon={Shield} label="Security & IPs" to="/admin/security" active={location.pathname === '/admin/security'} />
                 <SidebarItem icon={Settings} label="System Config" to="/admin/settings" active={location.pathname === '/admin/settings'} />
             </div>
         </nav>

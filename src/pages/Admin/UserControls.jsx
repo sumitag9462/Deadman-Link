@@ -148,28 +148,27 @@ const UserControls = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 relative">
         <div>
-          <h1 className="text-2xl font-bold text-white">
+          <h1 className="text-4xl font-bold text-white mb-2">
             User Access Controls
           </h1>
-          <p className="text-sm text-slate-400">
-            Define roles and decide which parts of Deadman each user
-            can touch.
+          <p className="text-lg text-slate-300">
+            Manage roles and user permissions
           </p>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Shield className="w-4 h-4 text-emerald-400" />
-          <span>Role-based security is ON</span>
+        <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border border-emerald-500/30 rounded-full\">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse\"></div>\n          <span className="text-emerald-300 font-medium\">Active</span>
         </div>
+        <div className="absolute -top-4 -right-4 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl\"></div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Left: user list */}
-        <Card className="bg-slate-900 border-slate-800 xl:col-span-2">
+        <Card className="xl:col-span-2 bg-linear-to-br from-slate-800/90 to-slate-900/90 border border-slate-700/50">
           {/* Filters */}
           <form
             onSubmit={handleSearchSubmit}
@@ -179,8 +178,8 @@ const UserControls = () => {
               <div className="relative w-full max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <input
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
-                  placeholder="Search by name or email…"
+                  className="w-full bg-slate-800/80 border border-slate-600/50 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 transition-all"
+                  placeholder="Search by name or email..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
@@ -189,7 +188,7 @@ const UserControls = () => {
 
             <div className="flex items-center gap-3">
               <select
-                className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs uppercase tracking-wide text-slate-300 focus:outline-none focus:border-emerald-500"
+                className="bg-slate-800/80 border border-slate-600/50 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 transition-all"
                 value={roleFilter}
                 onChange={(e) => {
                   setRoleFilter(e.target.value);
@@ -203,7 +202,7 @@ const UserControls = () => {
               </select>
 
               <select
-                className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs uppercase tracking-wide text-slate-300 focus:outline-none focus:border-emerald-500"
+                className="bg-white/5 border border-slate-200/10 rounded-md px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-emerald-500"
                 value={statusFilter}
                 onChange={(e) => {
                   setStatusFilter(e.target.value);

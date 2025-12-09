@@ -109,6 +109,7 @@ const linkSchema = new mongoose.Schema(
 
     // Who actually owns this link (for per-user dashboards)
     ownerEmail: { type: String, default: null },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 
     // Favorites / Highlights
     isFavorite: { type: Boolean, default: false },

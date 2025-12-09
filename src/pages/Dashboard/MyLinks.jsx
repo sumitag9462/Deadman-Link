@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Star,
   Filter,
+  Search,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
@@ -21,6 +22,7 @@ import { Table } from '../../components/ui/Table';
 import { Badge } from '../../components/ui/Badge';
 import { useClipboard } from '../../hooks/useClipboard';
 import { QRPopup } from '../../components/links/QRPopup';
+import { ReportLinkButton } from '../../components/links/ReportLinkButton';
 import api from '../../services/api';
 import { APP_BASE_URL } from '../../config/appUrl'; // uses env + origin
 import { useAuth } from '../../hooks/useAuth';
@@ -93,7 +95,6 @@ const StatusBadges = ({ link }) => {
   return <div className="flex flex-wrap gap-1 mt-1">{badges}</div>;
 };
 
-// Per-link spy-style avatar (no auth needed)
 const getLinkAvatar = (link) => {
   const seed = encodeURIComponent(
     link.title || link.slug || link.targetUrl || 'Deadman Agent',
@@ -115,24 +116,18 @@ const MyLinks = () => {
   const [deleteLink, setDeleteLink] = useState(null);
   const [qrLink, setQrLink] = useState(null);
   const [filter, setFilter] = useState('All');
+  const [searchTerm, setSearchTerm] = useState('');
 
   const [links, setLinks] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const { copy } = useClipboard();
 
-  // Fetch only the current user's links
-  const loadLinks = async (ownerEmail) => {
-    if (!ownerEmail) {
-      setLinks([]);
-      return;
-    }
-
+  // Fetch user's links only (backend filters by authenticated user)
+  const loadLinks = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/links', {
-        params: { ownerEmail },
-      });
+      const res = await api.get('/links');
       setLinks(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error('Failed to load links', err);
@@ -154,16 +149,12 @@ const MyLinks = () => {
   };
 
   useEffect(() => {
-    if (user?.email) {
-      loadLinks(user.email);
-    }
-  }, [user?.email]);
+    loadLinks();
+  }, []);
 
   const handleLinkCreated = () => {
     setCreateOpen(false);
-    if (user?.email) {
-      loadLinks(user.email);
-    }
+    loadLinks();
   };
 
   const handleEditLink = (link) => {
@@ -187,13 +178,27 @@ const MyLinks = () => {
     setDeleteLink(null);
   };
 
-  // Apply collection filter
+  // Apply collection filter and search
   const filteredLinks = Array.isArray(links)
     ? links.filter((link) => {
-        if (filter === 'All') return true;
-        const collection =
-          link.collectionName || link.collection || 'General';
-        return collection === filter;
+        // Collection filter
+        if (filter !== 'All') {
+          const collection =
+            link.collectionName || link.collection || 'General';
+          if (collection !== filter) return false;
+        }
+        
+        // Search filter
+        if (searchTerm) {
+          const search = searchTerm.toLowerCase();
+          return (
+            link.title?.toLowerCase().includes(search) ||
+            link.slug?.toLowerCase().includes(search) ||
+            link.targetUrl?.toLowerCase().includes(search)
+          );
+        }
+        
+        return true;
       })
     : [];
 
@@ -363,34 +368,47 @@ const MyLinks = () => {
       cell: (row) => {
         const url = buildLinkUrl(row.slug);
         return (
-          <LinkActionMenu
-            link={row}
-            url={url}
-            onEdit={() => handleEditLink(row)}
-            onDelete={() => handleDeleteLink(row)}
-          />
+          <div className="flex items-center gap-2">
+            <LinkActionMenu
+              link={row}
+              url={url}
+              onEdit={() => handleEditLink(row)}
+              onDelete={() => handleDeleteLink(row)}
+            />
+            <ReportLinkButton 
+              linkId={row._id} 
+              linkSlug={row.slug}
+            />
+          </div>
         );
       },
     },
   ];
 
   return (
-    <div>
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <FolderOpen className="w-6 h-6 text-emerald-500" />
-            Mission Log
-          </h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Manage, track, and destroy your secure endpoints.
+          <h1 className="text-2xl font-semibold text-white mb-1">My Links</h1>
+          <p className="text-sm text-slate-400">
+            Manage and track your secure endpoints
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-3 flex-col sm:flex-row">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Search links..."
+              className="bg-white/5 border border-slate-200/10 text-slate-200 text-sm rounded-md pl-9 pr-4 py-2 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 w-full sm:w-64"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
           <div className="relative">
             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             <select
-              className="bg-slate-900 border border-slate-800 text-slate-200 text-sm rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:border-emerald-500 appearance-none h-10"
+              className="bg-white/5 border border-slate-200/10 text-slate-200 text-sm rounded-md pl-9 pr-4 py-2 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 appearance-none"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             >
@@ -410,7 +428,7 @@ const MyLinks = () => {
           </div>
           <Button
             onClick={() => setCreateOpen(true)}
-            className="w-full md:w-auto px-6"
+            className="w-full sm:w-auto px-6"
           >
             <Plus className="w-4 h-4 mr-2" />
             Create Link

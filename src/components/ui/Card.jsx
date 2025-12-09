@@ -4,7 +4,10 @@ import { cn } from '../../utils/cn';
 export const Card = ({ children, className, ...props }) => {
   return (
     <div 
-      className={cn("bg-slate-900 border border-slate-800 rounded-xl shadow-sm", className)} 
+      className={cn(
+        'rounded-xl border border-slate-700/50 bg-gradient-to-br from-slate-800/90 to-slate-900/90 backdrop-blur-xl p-6 shadow-2xl shadow-black/20 hover:shadow-emerald-500/10 hover:border-slate-600/50 transition-all duration-300',
+        className
+      )} 
       {...props}
     >
       {children}

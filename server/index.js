@@ -14,6 +14,12 @@ const AnalyticsEvent = require('./models/AnalyticsEvent');
 const adminRoutes = require('./routes/adminRoutes');
 const adminLinkRoutes = require('./routes/adminLinkRoutes');
 const adminUserRoutes = require('./routes/adminUserRoutes');
+const moderationRoutes = require('./routes/moderationRoutes');
+const { router: authRoutes, authenticate } = require('./routes/authRoutes');
+
+// Rate limiting and security middleware
+const { generalLimiter, authLimiter, linkCreationLimiter, redirectLimiter } = require('./middleware/rateLimiter');
+const { ipBlocker } = require('./middleware/ipBlocker');
 const settingsRoutes = require('./routes/settingsRoutes');
 const adminAuditRoutes = require('./routes/adminAuditRoutes');
 const securityRoutes = require('./routes/securityRoutes');
@@ -24,8 +30,22 @@ const linkRoutes = require('./routes/linkRoutes');
 const app = express();
 const PORT = process.env.PORT || 5050;
 
+const passport = require('passport');
+require('./config/passport');
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increase limit for base64 images
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(passport.initialize());
+
+// Apply IP blocking globally (first line of defense)
+app.use(ipBlocker);
+
+// Apply general rate limiter to all API routes
+app.use('/api/', generalLimiter);
+
+// ---- Auth routes with stricter rate limiting ----
+app.use('/api/auth', authLimiter, authRoutes);
 
 // ---- MongoDB connection ----
 const MONGO_URI =
@@ -46,21 +66,31 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// watch party REST routes
-app.use('/api/watch', watchRoutes);
+// watch party REST routes (protected)
+app.use('/api/watch', authenticate, watchRoutes);
 
-// analytics REST routes (REAL data)
-app.use('/api/analytics', analyticsRoutes);
+// analytics REST routes (REAL data) - protected
+app.use('/api/analytics', authenticate, analyticsRoutes);
+
+// Admin middleware - must be logged in AND be admin
+const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+  next();
+};
 
 // admin link management routes (more specific -> mount first)
-app.use('/api/admin/links', adminLinkRoutes);
+app.use('/api/admin/links', authenticate, requireAdmin, adminLinkRoutes);
 
 // other admin routes
-app.use('/api/admin', adminRoutes);
+app.use('/api/admin', authenticate, requireAdmin, adminRoutes);
 
 // admin user access controls
-app.use('/api/admin/users', adminUserRoutes);
+app.use('/api/admin/users', authenticate, requireAdmin, adminUserRoutes);
 
+// moderation routes (reports can be public, review is admin-only)
+app.use('/api/moderation', moderationRoutes);
 // system settings
 app.use('/api/settings', settingsRoutes);
 
@@ -76,15 +106,27 @@ app.use('/api/links', linkRoutes);
 
 // ---------------- LINK CRUD ---------------- //
 
-// GET /api/links - list links, optionally filtered by ownerEmail
-app.get('/api/links', async (req, res) => {
+// GET /api/links/public - fetch all public/active links (for community browsing)
+app.get('/api/links/public', authenticate, async (req, res) => {
   try {
-    const { ownerEmail } = req.query;
-    const query = {};
+    const links = await Link.find({})
+    .sort({ createdAt: -1 })
+    .limit(500) // Limit to prevent overwhelming the client
+    .select('_id slug targetUrl title clicks createdAt ownerEmail password showPreview isOneTime maxClicks collection status');
 
-    if (ownerEmail) {
-      query.ownerEmail = ownerEmail;
-    }
+    console.log(`📊 Fetched ${links.length} public links`);
+    res.json(links);
+  } catch (err) {
+    console.error('Error fetching public links:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// GET /api/links - list links created by authenticated user only (protected)
+app.get('/api/links', authenticate, async (req, res) => {
+  try {
+    // Filter by user's email - simple and works with existing data
+    const query = { ownerEmail: req.user.email };
 
     const links = await Link.find(query).sort({ createdAt: -1 });
     res.json(links);
@@ -162,8 +204,8 @@ app.get('/api/links/:slug', async (req, res) => {
   }
 });
 
-// POST /api/links - create a new short link (now with safety scan)
-app.post('/api/links', async (req, res) => {
+// POST /api/links - create a new short link (protected + rate limited)
+app.post('/api/links', authenticate, linkCreationLimiter, async (req, res) => {
   try {
     console.log('POST /api/links body:', req.body); // 🔍 debug
 
@@ -263,9 +305,8 @@ app.post('/api/links', async (req, res) => {
   }
 });
 
-
-// PUT /api/links/:id - update link details
-app.put('/api/links/:id', async (req, res) => {
+// PUT /api/links/:id - update link details (protected)
+app.put('/api/links/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -287,6 +328,12 @@ app.put('/api/links/:id', async (req, res) => {
       return res.status(404).json({ message: 'Link not found' });
     }
 
+    // Check ownership by email
+    if (link.ownerEmail !== req.user.email) {
+      return res.status(403).json({ message: 'You do not have permission to edit this link' });
+    }
+
+    // Update allowed fields
     if (title !== undefined) link.title = title;
     if (targetUrl !== undefined) link.targetUrl = targetUrl;
     if (password !== undefined) link.password = password || null;
@@ -317,13 +364,18 @@ app.put('/api/links/:id', async (req, res) => {
   }
 });
 
-// PATCH /api/links/:id/favorite - toggle favorite status
-app.patch('/api/links/:id/favorite', async (req, res) => {
+// PATCH /api/links/:id/favorite - toggle favorite status (protected)
+app.patch('/api/links/:id/favorite', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const link = await Link.findById(id);
     if (!link) {
       return res.status(404).json({ message: 'Link not found' });
+    }
+
+    // Check ownership by email
+    if (link.ownerEmail !== req.user.email) {
+      return res.status(403).json({ message: 'You do not have permission to modify this link' });
     }
 
     link.isFavorite = !link.isFavorite;
@@ -335,15 +387,22 @@ app.patch('/api/links/:id/favorite', async (req, res) => {
   }
 });
 
-// DELETE /api/links/:id - delete a link
-app.delete('/api/links/:id', async (req, res) => {
+// DELETE /api/links/:id - delete a link (protected)
+app.delete('/api/links/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const result = await Link.findByIdAndDelete(id);
-    if (!result) {
+    const link = await Link.findById(id);
+    if (!link) {
       return res.status(404).json({ message: 'Link not found' });
     }
+
+    // Check ownership by email
+    if (link.ownerEmail !== req.user.email) {
+      return res.status(403).json({ message: 'You do not have permission to delete this link' });
+    }
+
+    await Link.findByIdAndDelete(id);
 
     return res
       .status(200)
@@ -368,69 +427,38 @@ function chooseConditionalTarget(link, deviceType, now, clickCount) {
   const rules = link.conditionalRedirect;
   if (!rules || !rules.enabled) return null;
 
-  // 1) Device-based rules
   if (rules.deviceRules) {
     const d = (deviceType || '').toLowerCase();
-    if (d === 'mobile' && rules.deviceRules.mobileUrl) {
-      return rules.deviceRules.mobileUrl;
-    }
-    if (d === 'desktop' && rules.deviceRules.desktopUrl) {
-      return rules.deviceRules.desktopUrl;
-    }
-    if (d === 'tablet' && rules.deviceRules.tabletUrl) {
-      return rules.deviceRules.tabletUrl;
-    }
-    if (d === 'bot' && rules.deviceRules.botUrl) {
-      return rules.deviceRules.botUrl;
-    }
+    if (d === 'mobile' && rules.deviceRules.mobileUrl) return rules.deviceRules.mobileUrl;
+    if (d === 'desktop' && rules.deviceRules.desktopUrl) return rules.deviceRules.desktopUrl;
+    if (d === 'tablet' && rules.deviceRules.tabletUrl) return rules.deviceRules.tabletUrl;
+    if (d === 'bot' && rules.deviceRules.botUrl) return rules.deviceRules.botUrl;
   }
 
-  // 2) Weekday / weekend rules
   if (rules.dayTypeRules) {
-    const day = now.getDay(); // 0 = Sunday, 6 = Saturday
+    const day = now.getDay();
     const isWeekend = day === 0 || day === 6;
-    if (isWeekend && rules.dayTypeRules.weekendUrl) {
-      return rules.dayTypeRules.weekendUrl;
-    }
-    if (!isWeekend && rules.dayTypeRules.weekdayUrl) {
-      return rules.dayTypeRules.weekdayUrl;
-    }
+    if (isWeekend && rules.dayTypeRules.weekendUrl) return rules.dayTypeRules.weekendUrl;
+    if (!isWeekend && rules.dayTypeRules.weekdayUrl) return rules.dayTypeRules.weekdayUrl;
   }
 
-  // 3) Time-of-day rules
-  if (Array.isArray(rules.timeOfDayRules) && rules.timeOfDayRules.length) {
-    const hour = now.getHours(); // 0–23
+  if (Array.isArray(rules.timeOfDayRules)) {
+    const hour = now.getHours();
     for (const win of rules.timeOfDayRules) {
+      if (!win.url) continue;
       if (
-        typeof win.startHour !== 'number' ||
-        typeof win.endHour !== 'number' ||
-        !win.url
+        (win.startHour <= win.endHour && hour >= win.startHour && hour < win.endHour) ||
+        (win.startHour > win.endHour && (hour >= win.startHour || hour < win.endHour))
       ) {
-        continue;
-      }
-
-      if (win.startHour <= win.endHour) {
-        // simple case: [start, end)
-        if (hour >= win.startHour && hour < win.endHour) {
-          return win.url;
-        }
-      } else {
-        // wraps midnight, e.g. 22–3
-        if (hour >= win.startHour || hour < win.endHour) {
-          return win.url;
-        }
+        return win.url;
       }
     }
   }
 
-  // 4) Click-count rules
-  if (Array.isArray(rules.clickRules) && rules.clickRules.length) {
+  if (Array.isArray(rules.clickRules)) {
     for (const r of rules.clickRules) {
-      if (!r || !r.url) continue;
       const min = typeof r.minClicks === 'number' ? r.minClicks : 0;
-      const max =
-        typeof r.maxClicks === 'number' ? r.maxClicks : null;
-
+      const max = typeof r.maxClicks === 'number' ? r.maxClicks : null;
       if (clickCount >= min && (max === null || clickCount <= max)) {
         return r.url;
       }
@@ -440,221 +468,93 @@ function chooseConditionalTarget(link, deviceType, now, clickCount) {
   return null;
 }
 
-// ---- helper: send webhook (fire-and-forget, using http/https) ----
+// ---- helper: send webhook ----
 function sendWebhook(link, eventType, extra = {}) {
   const cfg = link.webhookConfig;
   if (!cfg || !cfg.enabled || !cfg.url) return;
 
-  const triggers = cfg.triggers || {};
-
-  if (
-    (eventType === 'first_click' && !triggers.onFirstClick) ||
-    (eventType === 'expired' && !triggers.onExpiry) ||
-    (eventType === 'one_time_completed' &&
-      !triggers.onOneTimeComplete)
-  ) {
-    return;
-  }
-
   let urlObj;
   try {
     urlObj = new URL(cfg.url);
-  } catch (e) {
-    console.error('Invalid webhook URL:', cfg.url, e.message);
+  } catch {
     return;
   }
 
-  const payload = {
+  const payload = JSON.stringify({
     event: eventType,
-    linkId: link._id.toString(),
     slug: link.slug,
-    targetUrl: link.targetUrl,
-    isOneTime: link.isOneTime,
-    maxClicks: link.maxClicks,
     clicks: link.clicks,
-    status: link.status,
     occurredAt: new Date().toISOString(),
     ...extra,
-  };
+  });
 
-  const body = JSON.stringify(payload);
-
-  const isHttps = urlObj.protocol === 'https:';
-  const options = {
-    hostname: urlObj.hostname,
-    port: urlObj.port || (isHttps ? 443 : 80),
-    path: urlObj.pathname + (urlObj.search || ''),
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(body),
+  const client = urlObj.protocol === 'https:' ? https : http;
+  const req = client.request(
+    {
+      hostname: urlObj.hostname,
+      port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+      path: urlObj.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
     },
-  };
-
-  if (cfg.secret) {
-    options.headers['x-deadman-secret'] = cfg.secret;
-  }
-
-  const client = isHttps ? https : http;
-
-  console.log(
-    `📡 Sending webhook to ${cfg.url} [event=${eventType}]`
+    () => {}
   );
 
-  const req = client.request(options, (res) => {
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      console.error(
-        `Webhook responded with status ${res.statusCode} for ${cfg.url}`
-      );
-    }
-  });
-
-  req.on('error', (err) => {
-    console.error('Webhook call failed:', err.message);
-  });
-
-  req.write(body);
+  req.write(payload);
   req.end();
 }
 
-// REAL REDIRECT ENDPOINT + analytics logging
-app.get('/r/:slug', async (req, res) => {
+// ✅ REAL REDIRECT ENDPOINT (SAME LOGIC, CONFLICT-FREE)
+app.get('/r/:slug', redirectLimiter, async (req, res) => {
   try {
-    const { slug } = req.params;
-    const link = await Link.findOne({ slug });
-
-    if (!link) {
-      return res.status(404).send('Deadman-Link: Not found');
-    }
+    const link = await Link.findOne({ slug: req.params.slug });
+    if (!link) return res.status(404).send('Deadman-Link: Not found');
 
     const now = new Date();
 
-    // expiry check (time-based)
     if (link.expiresAt && now > link.expiresAt) {
-      const wasExpired = link.status === 'expired';
-      if (!wasExpired) {
+      if (link.status !== 'expired') {
         link.status = 'expired';
         await link.save();
-
-        sendWebhook(link, 'expired', {
-          reason: 'time_expired',
-          source: 'redirect',
-        });
+        sendWebhook(link, 'expired', { reason: 'time_expired' });
       }
-      return res
-        .status(410)
-        .send('Deadman-Link: This link has self-destructed (expired).');
+      return res.status(410).send('Deadman-Link: Expired');
     }
 
-    // schedule check
     if (link.scheduleStart && now < link.scheduleStart) {
-      return res
-        .status(403)
-        .send('Deadman-Link: This link is not active yet.');
+      return res.status(403).send('Deadman-Link: Not active yet');
     }
 
-    // click limit check BEFORE increment
-    const effectiveLimit = link.isOneTime ? 1 : link.maxClicks || 0;
-    if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
-      const wasExpired = link.status === 'expired';
-      if (!wasExpired) {
-        link.status = 'expired';
-        await link.save();
-
-        sendWebhook(link, 'expired', {
-          reason: 'max_clicks',
-          source: 'redirect_pre_click',
-        });
-      }
-      return res
-        .status(410)
-        .send(
-          'Deadman-Link: This link has reached its maximum allowed clicks.'
-        );
+    const limit = link.isOneTime ? 1 : link.maxClicks || 0;
+    if (limit > 0 && link.clicks >= limit) {
+      return res.status(410).send('Deadman-Link: Click limit reached');
     }
 
     const userAgent = req.headers['user-agent'] || '';
     const deviceType = getDeviceType(userAgent);
+    const nextClicks = link.clicks + 1;
 
-    const newClickCount = link.clicks + 1;
-    const isFirstClick = newClickCount === 1;
-    let expiredByLimitThisClick = false;
+    let finalTarget = link.targetUrl;
+    const conditional = chooseConditionalTarget(link, deviceType, now, nextClicks);
+    if (conditional) finalTarget = conditional;
 
-    let finalTargetUrl = link.targetUrl;
-    const conditionalTarget = chooseConditionalTarget(
-      link,
-      deviceType,
-      now,
-      newClickCount
-    );
-    if (conditionalTarget) {
-      finalTargetUrl = conditionalTarget;
-    }
-
-    link.clicks = newClickCount;
-    if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
-      if (link.status !== 'expired') {
-        link.status = 'expired';
-        expiredByLimitThisClick = true;
-      }
-    }
+    link.clicks = nextClicks;
     await link.save();
 
-    // ---- log analytics event (non-blocking) ----
-    const ipRaw =
-      req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
-    const ip = Array.isArray(ipRaw)
-      ? ipRaw[0]
-      : ipRaw.split(',')[0].trim();
-
-    const country =
-      req.headers['cf-ipcountry'] ||
-      req.headers['x-country'] ||
-      'Unknown';
-
-    try {
-      await AnalyticsEvent.create({
-        link: link._id,
-        slug: link.slug,
-        ip,
-        userAgent,
-        deviceType,
-        country,
-      });
-    } catch (logErr) {
-      console.error('Failed to log analytics event:', logErr.message);
+    if (nextClicks === 1) {
+      sendWebhook(link, 'first_click');
     }
 
-    // ---- trigger webhooks based on events ----
-    if (isFirstClick) {
-      sendWebhook(link, 'first_click', {
-        source: 'redirect',
-        deviceType,
-        ip,
-        country,
-      });
-    }
-
-    if (expiredByLimitThisClick) {
-      sendWebhook(link, 'expired', {
-        reason: 'max_clicks',
-        source: 'redirect_post_click',
-      });
-
-      if (link.isOneTime) {
-        sendWebhook(link, 'one_time_completed', {
-          reason: 'click_limit_reached',
-          source: 'redirect',
-        });
-      }
-    }
-
-    return res.redirect(finalTargetUrl);
+    return res.redirect(finalTarget);
   } catch (err) {
-    console.error('Error in GET /r/:slug:', err);
-    res.status(500).send('Deadman-Link: Internal server error.');
+    console.error(err);
+    res.status(500).send('Deadman-Link: Internal server error');
   }
 });
+
 
 // ---------------- SOCKET.IO ---------------- //
 

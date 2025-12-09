@@ -1,4 +1,8 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect } from 'react';
+import api from '../services/api';
+
+const STORAGE_USER = 'deadman_user';
+const STORAGE_TOKEN = 'deadman_token';
 
 export const AuthContext = createContext();
 
@@ -7,31 +11,42 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Simulate checking a stored token on app load
-    const checkAuth = async () => {
+    const bootstrap = async () => {
       try {
-        const storedUser = localStorage.getItem("deadman_user");
+        const storedUser = localStorage.getItem(STORAGE_USER);
+        const storedToken = localStorage.getItem(STORAGE_TOKEN);
+
+        if (storedToken) {
+          api.defaults.headers.common.Authorization = `Bearer ${storedToken}`;
+        }
+
         if (storedUser) {
           setUser(JSON.parse(storedUser));
         }
       } catch (error) {
-        console.error("Auth Check Failed", error);
+        console.error('Auth bootstrap failed', error);
       } finally {
         setLoading(false);
       }
     };
 
-    checkAuth();
+    bootstrap();
   }, []);
 
-  const login = (userData) => {
+  const login = (userData, token) => {
     setUser(userData);
-    localStorage.setItem("deadman_user", JSON.stringify(userData));
+    if (token) {
+      api.defaults.headers.common.Authorization = `Bearer ${token}`;
+      localStorage.setItem(STORAGE_TOKEN, token);
+    }
+    localStorage.setItem(STORAGE_USER, JSON.stringify(userData));
   };
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem("deadman_user");
+    delete api.defaults.headers.common.Authorization;
+    localStorage.removeItem(STORAGE_USER);
+    localStorage.removeItem(STORAGE_TOKEN);
   };
 
   return (

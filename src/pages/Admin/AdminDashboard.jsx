@@ -18,28 +18,32 @@ const AdminDashboard = () => {
   const recentEvents = data?.recentEvents ?? [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 relative">
         <div>
-          <h1 className="text-2xl font-bold text-white">System Overview</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            High-level view of Deadman-Link activity and health.
+          <h1 className="text-4xl font-bold text-white mb-2">Admin Dashboard</h1>
+          <p className="text-lg text-slate-300">
+            System overview and activity monitoring
           </p>
         </div>
-        <span className="text-xs font-mono text-emerald-500">
-          LIVE • ADMIN CONSOLE
-        </span>
+        {!loading && data && (
+          <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border border-emerald-500/30 rounded-full">
+            <div className="w-2.5 h-2.5 bg-emerald-400 rounded-full animate-pulse"></div>
+            <span className="text-emerald-300 font-medium">Live</span>
+          </div>
+        )}
+        <div className="absolute -top-4 -right-4 w-32 h-32 bg-purple-500/10 rounded-full blur-3xl"></div>
       </div>
 
       {error && (
-        <p className="text-sm text-red-400">
+        <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400">
           Failed to load admin overview: {error.message || 'Unknown error'}
-        </p>
+        </div>
       )}
 
-      {/* Top stats row – all real data now */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Top stats row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard
           title="Total Clicks"
           value={loading ? '…' : totalClicks.toLocaleString()}
@@ -63,33 +67,31 @@ const AdminDashboard = () => {
       </div>
 
       {/* Charts + alerts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[420px]">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Traffic chart */}
-        <div className="lg:col-span-2 h-full">
+        <div className="lg:col-span-2">
           <ClickChart data={timeline} loading={loading} />
         </div>
 
-        {/* Recent system alerts (derived from analytics events for now) */}
-        <Card className="bg-slate-900 border-slate-800 h-full flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-sm font-semibold text-white">
-                Recent System Alerts
-              </h2>
-              <p className="text-xs text-slate-500">
-                Latest link activity across the platform.
-              </p>
-            </div>
+        {/* Recent system alerts */}
+        <Card className="h-[400px] flex flex-col">
+          <div className="mb-4">
+            <h2 className="text-base font-semibold text-white mb-1">
+              Recent Activity
+            </h2>
+            <p className="text-xs text-slate-500">
+              Latest platform events
+            </p>
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-3">
+          <div className="flex-1 overflow-y-auto space-y-2 pr-2">
             {loading && (
-              <p className="text-xs text-slate-500">Loading activity…</p>
+              <p className="text-sm text-slate-500">Loading...</p>
             )}
 
             {!loading && recentEvents.length === 0 && (
-              <p className="text-xs text-slate-500">
-                No events logged yet. Share a link to start the feed.
+              <p className="text-sm text-slate-500">
+                No recent activity
               </p>
             )}
 
@@ -97,7 +99,7 @@ const AdminDashboard = () => {
               recentEvents.map((ev) => (
                 <div
                   key={ev.id}
-                  className="rounded-lg bg-slate-950/70 border border-slate-800 px-3 py-2"
+                  className="rounded-md bg-white/5 px-3 py-2"
                 >
                   <p className="text-xs text-slate-200">{ev.message}</p>
                   <p className="text-[10px] text-slate-500 mt-1">

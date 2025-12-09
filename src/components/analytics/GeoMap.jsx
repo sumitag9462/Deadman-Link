@@ -11,49 +11,40 @@ export const GeoMap = ({ data = [], loading }) => {
   const hasData = regions.length > 0;
 
   return (
-    <Card className="bg-slate-900 border-slate-800 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400">
-            <Globe className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
-              Top Regions
-            </div>
-            <div className="text-[10px] text-slate-500">
-              Geo distribution
-            </div>
-          </div>
-        </div>
+    <Card className="h-[400px] flex flex-col">
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-base font-semibold text-white">
+          Top Locations
+        </h3>
+        <Globe className="w-5 h-5 text-slate-500" />
       </div>
 
       {loading ? (
-        <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
-          Loading geo data…
+        <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
+          Loading locations...
         </div>
       ) : !hasData ? (
-        <div className="flex-1 flex items-center justify-center text-slate-500 text-sm text-center px-4">
-          No geo data yet. Once users start clicking from different regions, you'll see them here.
+        <div className="flex-1 flex items-center justify-center text-slate-500 text-sm text-center">
+          No location data yet
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto space-y-2 mt-2">
+        <div className="flex-1 overflow-y-auto space-y-2 pr-2">
           {regions.map((region, idx) => (
             <div
               key={`${region.country}-${idx}`}
-              className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-950/60 border border-slate-800"
+              className="flex items-center justify-between py-3 px-4 rounded-md bg-white/5 hover:bg-white/10 transition-colors duration-150"
             >
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500 w-4 text-right">
-                  {idx + 1}.
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-slate-500 font-medium w-6">
+                  {idx + 1}
                 </span>
-                <span className="text-sm text-slate-200">
+                <span className="text-sm text-white">
                   {region.country || 'Unknown'}
                 </span>
               </div>
-              <div className="text-xs font-mono text-emerald-400">
-                {region.clicks ?? 0} clicks
-              </div>
+              <span className="text-sm font-medium text-slate-300">
+                {(region.clicks ?? 0).toLocaleString()}
+              </span>
             </div>
           ))}
         </div>

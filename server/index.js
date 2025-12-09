@@ -13,13 +13,33 @@ const AnalyticsEvent = require('./models/AnalyticsEvent');
 const adminRoutes = require('./routes/adminRoutes');
 const adminLinkRoutes = require('./routes/adminLinkRoutes');
 const adminUserRoutes = require('./routes/adminUserRoutes');
+const moderationRoutes = require('./routes/moderationRoutes');
+const { router: authRoutes, authenticate } = require('./routes/authRoutes');
+
+// Rate limiting and security middleware
+const { generalLimiter, authLimiter, linkCreationLimiter, redirectLimiter } = require('./middleware/rateLimiter');
+const { ipBlocker } = require('./middleware/ipBlocker');
 
 const app = express();
 // Default to a less common port to reduce local collisions
 const PORT = process.env.PORT || 5050;
 
+const passport = require('passport');
+require('./config/passport');
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increase limit for base64 images
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(passport.initialize());
+
+// Apply IP blocking globally (first line of defense)
+app.use(ipBlocker);
+
+// Apply general rate limiter to all API routes
+app.use('/api/', generalLimiter);
+
+// ---- Auth routes with stricter rate limiting ----
+app.use('/api/auth', authLimiter, authRoutes);
 
 // ---- MongoDB connection ----
 const MONGO_URI =
@@ -40,33 +60,53 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// watch party REST routes
-app.use('/api/watch', watchRoutes);
+// watch party REST routes (protected)
+app.use('/api/watch', authenticate, watchRoutes);
 
-// analytics REST routes (REAL data)
-app.use('/api/analytics', analyticsRoutes);
+// analytics REST routes (REAL data) - protected
+app.use('/api/analytics', authenticate, analyticsRoutes);
+
+// Admin middleware - must be logged in AND be admin
+const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+  next();
+};
 
 // admin link management routes (more specific -> mount first)
-app.use('/api/admin/links', adminLinkRoutes);
+app.use('/api/admin/links', authenticate, requireAdmin, adminLinkRoutes);
 
 // other admin routes
-app.use('/api/admin', adminRoutes);
+app.use('/api/admin', authenticate, requireAdmin, adminRoutes);
 
 // admin user access controls
-app.use('/api/admin/users', adminUserRoutes);
+app.use('/api/admin/users', authenticate, requireAdmin, adminUserRoutes);
 
+// moderation routes (reports can be public, review is admin-only)
+app.use('/api/moderation', moderationRoutes);
 
-// GET /api/links - list links, optionally filtered by ownerEmail
-app.get('/api/links', async (req, res) => {
+// GET /api/links/public - fetch all public/active links (for community browsing)
+app.get('/api/links/public', authenticate, async (req, res) => {
   try {
-    const { ownerEmail } = req.query;
+    const links = await Link.find({})
+    .sort({ createdAt: -1 })
+    .limit(500) // Limit to prevent overwhelming the client
+    .select('_id slug targetUrl title clicks createdAt ownerEmail password showPreview isOneTime maxClicks collection status');
 
-    const query = {};
+    console.log(`📊 Fetched ${links.length} public links`);
+    res.json(links);
+  } catch (err) {
+    console.error('Error fetching public links:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
 
-    // If ownerEmail is provided, only return that user's links
-    if (ownerEmail) {
-      query.ownerEmail = ownerEmail;
-    }
+// GET /api/links - list links created by authenticated user only (protected)
+app.get('/api/links', authenticate, async (req, res) => {
+  try {
+    // Filter by user's email - simple and works with existing data
+    const query = { ownerEmail: req.user.email };
 
     const links = await Link.find(query).sort({ createdAt: -1 });
     res.json(links);
@@ -133,8 +173,8 @@ app.get('/api/links/:slug', async (req, res) => {
   }
 });
 
-// POST /api/links - create a new short link
-app.post('/api/links', async (req, res) => {
+// POST /api/links - create a new short link (protected + rate limited)
+app.post('/api/links', authenticate, linkCreationLimiter, async (req, res) => {
   try {
     const {
       url,
@@ -202,8 +242,8 @@ app.post('/api/links', async (req, res) => {
   }
 });
 
-// PUT /api/links/:id - update link details
-app.put('/api/links/:id', async (req, res) => {
+// PUT /api/links/:id - update link details (protected)
+app.put('/api/links/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -221,6 +261,11 @@ app.put('/api/links/:id', async (req, res) => {
     const link = await Link.findById(id);
     if (!link) {
       return res.status(404).json({ message: 'Link not found' });
+    }
+
+    // Check ownership by email
+    if (link.ownerEmail !== req.user.email) {
+      return res.status(403).json({ message: 'You do not have permission to edit this link' });
     }
 
     // Update allowed fields
@@ -243,13 +288,18 @@ app.put('/api/links/:id', async (req, res) => {
   }
 });
 
-// PATCH /api/links/:id/favorite - toggle favorite status
-app.patch('/api/links/:id/favorite', async (req, res) => {
+// PATCH /api/links/:id/favorite - toggle favorite status (protected)
+app.patch('/api/links/:id/favorite', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const link = await Link.findById(id);
     if (!link) {
       return res.status(404).json({ message: 'Link not found' });
+    }
+
+    // Check ownership by email
+    if (link.ownerEmail !== req.user.email) {
+      return res.status(403).json({ message: 'You do not have permission to modify this link' });
     }
 
     link.isFavorite = !link.isFavorite;
@@ -261,15 +311,22 @@ app.patch('/api/links/:id/favorite', async (req, res) => {
   }
 });
 
-// DELETE /api/links/:id - delete a link
-app.delete('/api/links/:id', async (req, res) => {
+// DELETE /api/links/:id - delete a link (protected)
+app.delete('/api/links/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const result = await Link.findByIdAndDelete(id);
-    if (!result) {
+    const link = await Link.findById(id);
+    if (!link) {
       return res.status(404).json({ message: 'Link not found' });
     }
+
+    // Check ownership by email
+    if (link.ownerEmail !== req.user.email) {
+      return res.status(403).json({ message: 'You do not have permission to delete this link' });
+    }
+
+    await Link.findByIdAndDelete(id);
 
     return res
       .status(200)
@@ -289,8 +346,8 @@ function getDeviceType(userAgent = '') {
   return 'desktop';
 }
 
-// REAL REDIRECT ENDPOINT + analytics logging
-app.get('/r/:slug', async (req, res) => {
+// REAL REDIRECT ENDPOINT + analytics logging (rate limited to prevent bot abuse)
+app.get('/r/:slug', redirectLimiter, async (req, res) => {
   try {
     const { slug } = req.params;
     const link = await Link.findOne({ slug });
@@ -350,10 +407,22 @@ app.get('/r/:slug', async (req, res) => {
     const userAgent = req.headers['user-agent'] || '';
     const deviceType = getDeviceType(userAgent);
 
-    const country =
-      req.headers['cf-ipcountry'] ||
-      req.headers['x-country'] ||
-      'Unknown';
+    // Try to get country from headers first (Cloudflare, etc.)
+    let country = req.headers['cf-ipcountry'] || req.headers['x-country'];
+
+    // If not available, use IP geolocation API for local/testing
+    if (!country && ip && ip !== '::1' && ip !== '127.0.0.1') {
+      try {
+        const geoResponse = await fetch(`http://ip-api.com/json/${ip}?fields=country`);
+        const geoData = await geoResponse.json();
+        country = geoData.country || 'Unknown';
+      } catch (geoErr) {
+        console.log('Geolocation lookup failed:', geoErr.message);
+        country = 'Unknown';
+      }
+    } else if (!country) {
+      country = 'Local';
+    }
 
     try {
       await AnalyticsEvent.create({

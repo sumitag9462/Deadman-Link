@@ -11,11 +11,22 @@ router.get('/', async (req, res) => {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(now.getDate() - 7);
 
-    // Get all links + last 7 days of analytics events
-    const [links, events] = await Promise.all([
-      Link.find({}),
-      AnalyticsEvent.find({ createdAt: { $gte: sevenDaysAgo } }),
-    ]);
+    // Get user's email from authenticated request
+    const userEmail = req.user?.email;
+    if (!userEmail) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    // Get only user's links + analytics events for those links
+    const links = await Link.find({ ownerEmail: userEmail });
+    
+    // Get link IDs to filter analytics events
+    const linkIds = links.map(link => link._id);
+    
+    const events = await AnalyticsEvent.find({ 
+      link: { $in: linkIds },
+      createdAt: { $gte: sevenDaysAgo } 
+    });
 
     // ----- totals from links -----
     let totalClicks = 0;

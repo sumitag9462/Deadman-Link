@@ -11,15 +11,24 @@ export const Modal = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+    <div 
+      className="fixed inset-0 z-[99999] overflow-auto bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col relative"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700">
           <h3 className="text-lg font-semibold text-white">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+          <button 
+            onClick={onClose} 
+            className="text-slate-400 hover:text-white transition-colors p-1"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="p-6 max-h-[80vh] overflow-y-auto">
+        <div className="p-6 overflow-y-auto">
           {children}
         </div>
       </div>

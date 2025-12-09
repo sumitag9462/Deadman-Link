@@ -1,6 +1,7 @@
 // server/routes/adminLinkRoutes.js
 const express = require('express');
 const Link = require('../models/Link');
+const { auditLogger } = require('../middleware/auditLogger');
 
 const router = express.Router();
 
@@ -75,7 +76,9 @@ router.get('/', async (req, res) => {
  * Body: { status?, maxClicks? }
  * Used for toggling status etc.
  */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', 
+  auditLogger('BLOCK_LINK', (req, data) => `slug: ${data.slug || req.params.id}`),
+  async (req, res) => {
   try {
     const { id } = req.params;
     const { status, maxClicks } = req.body;
@@ -108,7 +111,9 @@ router.patch('/:id', async (req, res) => {
 /**
  * DELETE /api/admin/links/:id
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id',
+  auditLogger('DELETE_LINK', (req) => `link ID: ${req.params.id}`),
+  async (req, res) => {
   try {
     const { id } = req.params;
 

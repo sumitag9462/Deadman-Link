@@ -1,6 +1,7 @@
 // server/routes/adminUserRoutes.js
 const express = require('express');
 const AdminUser = require('../models/AdminUser');
+const { auditLogger } = require('../middleware/auditLogger');
 
 const router = express.Router();
 
@@ -153,6 +154,41 @@ router.patch('/:id', async (req, res) => {
 
     if (!updated) {
       return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Create audit log manually based on the action
+    if (req.user) {
+      try {
+        const AuditLog = require('../models/AuditLog');
+        let action = 'UPDATE_USER';
+        let target = `${updated.name} (${updated.email})`;
+        
+        if (status === 'banned') {
+          action = 'BAN_USER';
+          target = `Banned user: ${updated.name} (${updated.email})`;
+        } else if (status === 'active' && req.body.status) {
+          action = 'UNBAN_USER';
+          target = `Unbanned user: ${updated.name} (${updated.email})`;
+        } else if (role) {
+          action = 'CHANGE_USER_ROLE';
+          target = `Changed role to ${role}: ${updated.name} (${updated.email})`;
+        }
+
+        await AuditLog.create({
+          action,
+          adminId: req.user.sub || req.user._id,
+          adminEmail: req.user.email,
+          adminName: req.user.name || req.user.email,
+          target,
+          targetId: updated._id.toString(),
+          details: { update, previousRole: role ? 'changed' : 'same', previousStatus: status ? 'changed' : 'same' },
+          ip: req.ip || req.connection.remoteAddress || 'unknown',
+          userAgent: req.get('user-agent') || 'unknown',
+        });
+        console.log(`📝 Audit log created: ${action} for ${updated.email}`);
+      } catch (auditErr) {
+        console.error('Failed to create audit log:', auditErr.message);
+      }
     }
 
     const io = req.app.get('io');

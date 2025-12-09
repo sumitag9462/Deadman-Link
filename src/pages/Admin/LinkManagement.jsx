@@ -1,6 +1,6 @@
 // src/pages/Admin/LinkManagement.jsx
 import React, { useEffect, useState } from 'react';
-import { Search, Filter, Trash2, ShieldOff, RefreshCcw } from 'lucide-react';
+import { Search, Filter, Trash2, ShieldOff, RefreshCcw, Shield } from 'lucide-react';
 import api from '../../services/api';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -153,15 +153,15 @@ const LinkManagement = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 relative">
         <div>
-          <h1 className="text-2xl font-bold text-white">
+          <h1 className="text-4xl font-bold text-white mb-2">
             Link Management
           </h1>
-          <p className="text-sm text-slate-400">
-            Search, audit, and control all secure endpoints in the system.
+          <p className="text-lg text-slate-300">
+            Search, audit, and control all secure endpoints
           </p>
         </div>
 
@@ -170,14 +170,16 @@ const LinkManagement = () => {
           size="sm"
           onClick={() => fetchLinks({ page })}
           disabled={loading}
+          className="w-fit"
         >
           <RefreshCcw className="w-4 h-4 mr-2" />
           Refresh
         </Button>
+        <div className="absolute -top-4 -left-4 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl\"></div>
       </div>
 
       {/* Filters */}
-      <Card className="bg-slate-900 border-slate-800">
+      <Card className="bg-linear-to-br from-slate-800/90 to-slate-900/90 border border-slate-700/50">
         <form
           onSubmit={handleSearchSubmit}
           className="flex flex-col md:flex-row gap-4 items-center justify-between"
@@ -186,8 +188,8 @@ const LinkManagement = () => {
             <div className="relative w-full max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
               <input
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
-                placeholder="Search by slug, title, or destination URL…"
+                className="w-full bg-slate-800/80 border border-slate-600/50 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 transition-all"
+                placeholder="Search by slug, title, or URL..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -198,7 +200,7 @@ const LinkManagement = () => {
             <div className="relative">
               <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
               <select
-                className="bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs uppercase tracking-wide text-slate-300 focus:outline-none focus:border-emerald-500"
+                className="bg-white/5 border border-slate-200/10 rounded-md pl-9 pr-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 value={statusFilter}
                 onChange={handleStatusChange}
               >
@@ -217,15 +219,15 @@ const LinkManagement = () => {
       </Card>
 
       {/* Table */}
-      <Card className="bg-slate-900 border-slate-800">
-        <div className="flex items-center justify-between mb-3">
+      <Card className="bg-slate-900/40 backdrop-blur-xl border-slate-700/50 hover:border-slate-700 transition-all duration-300">
+        <div className="flex items-center justify-between mb-4 p-6 pb-0">
           <div className="text-sm text-slate-400">
             Total links:{' '}
-            <span className="text-slate-100 font-medium">
+            <span className="text-slate-100 font-semibold">
               {total}
             </span>
           </div>
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-slate-500 bg-slate-800/50 px-2 py-1 rounded">
             Page {page} of {pages}
           </div>
         </div>
@@ -233,13 +235,13 @@ const LinkManagement = () => {
         <div className="w-full overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead>
-              <tr>
-                <th className="px-4 py-2 text-left">Slug</th>
-                <th className="px-4 py-2 text-left">Destination</th>
-                <th className="px-4 py-2 text-center">Status</th>
-                <th className="px-4 py-2 text-center">Clicks</th>
-                <th className="px-4 py-2 text-center">Created</th>
-                <th className="px-4 py-2 text-right">Actions</th>
+              <tr className="border-t border-slate-700/50">
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-widest text-slate-400">Slug</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-widest text-slate-400">Destination</th>
+                <th className="px-6 py-3 text-center text-xs font-semibold uppercase tracking-widest text-slate-400">Status</th>
+                <th className="px-6 py-3 text-center text-xs font-semibold uppercase tracking-widest text-slate-400">Clicks</th>
+                <th className="px-6 py-3 text-center text-xs font-semibold uppercase tracking-widest text-slate-400">Created</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-widest text-slate-400">Actions</th>
               </tr>
             </thead>
             <tbody>

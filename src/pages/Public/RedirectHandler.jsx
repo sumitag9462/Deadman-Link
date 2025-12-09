@@ -4,6 +4,7 @@ import { Loader2, ShieldAlert, Lock, Eye } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Card } from '../../components/ui/Card';
+import { ReportLinkButton } from '../../components/links/ReportLinkButton';
 import api from '../../services/api';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
@@ -253,6 +254,13 @@ const RedirectHandler = () => {
             >
               Cancel
             </Button>
+
+            <div className="pt-4 border-t border-gray-800 flex justify-center">
+              <ReportLinkButton 
+                linkId={linkData._id} 
+                linkSlug={slug}
+              />
+            </div>
           </div>
         </Card>
       </div>

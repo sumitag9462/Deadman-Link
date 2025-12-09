@@ -37,7 +37,9 @@ router.get('/overview', async (req, res) => {
     const mobileClicks = clickAgg[0]?.mobileClicks ?? 0;
     const uniqueVisitors = uniqueIps.length;
     const mobilePercent =
-      totalClicks > 0 ? Math.round((mobileClicks / totalClicks) * 100) : 0;
+      totalClicks > 0
+        ? Math.round((mobileClicks / totalClicks) * 100)
+        : 0;
 
     // Clicks over last 7 days
     const since = new Date();
@@ -73,9 +75,24 @@ router.get('/overview', async (req, res) => {
 
     const recentEvents = recentEventsRaw.map((ev) => ({
       id: ev._id.toString(),
-      message: `Link /${ev.slug} clicked from ${ev.country || 'Unknown'} (${ev.ip || 'unknown IP'})`,
+      message: `Link /${ev.slug} clicked from ${
+        ev.country || 'Unknown'
+      } (${ev.ip || 'unknown IP'})`,
       createdAt: ev.createdAt,
     }));
+
+    // 🔎 NEW: log that an admin viewed the overview dashboard
+    // Later you can replace 'Admin Console' with real admin identity from auth.
+    await logAuditEvent({
+      action: 'SYSTEM_EVENT',
+      target: 'VIEW_ADMIN_OVERVIEW',
+      adminName: 'Admin Console',
+      ipAddress: req.ip,
+      metadata: {
+        totalLinks,
+        totalClicks,
+      },
+    });
 
     res.json({
       totalLinks,

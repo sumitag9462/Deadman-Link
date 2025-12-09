@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const http = require('http');
+const https = require('https'); // for webhook requests
 const { Server } = require('socket.io');
 require('dotenv').config();
 
@@ -20,9 +21,14 @@ const { router: authRoutes, authenticate } = require('./routes/authRoutes');
 // Rate limiting and security middleware
 const { generalLimiter, authLimiter, linkCreationLimiter, redirectLimiter } = require('./middleware/rateLimiter');
 const { ipBlocker } = require('./middleware/ipBlocker');
+const settingsRoutes = require('./routes/settingsRoutes');
+const adminAuditRoutes = require('./routes/adminAuditRoutes');
+const securityRoutes = require('./routes/securityRoutes');
+const { basicUrlSafetyCheck } = require('./scripts/urlSafety');
+const linkRoutes = require('./routes/linkRoutes');
+
 
 const app = express();
-// Default to a less common port to reduce local collisions
 const PORT = process.env.PORT || 5050;
 
 const passport = require('passport');
@@ -86,6 +92,20 @@ app.use('/api/admin/users', authenticate, requireAdmin, adminUserRoutes);
 
 // moderation routes (reports can be public, review is admin-only)
 app.use('/api/moderation', moderationRoutes);
+// system settings
+app.use('/api/settings', settingsRoutes);
+
+// admin audit-log routes
+app.use('/api/admin/audit-logs', adminAuditRoutes);
+
+// security / URL scan API
+app.use('/api/security', securityRoutes);
+
+// similarity / helper link routes
+app.use('/api/links', linkRoutes);
+
+
+// ---------------- LINK CRUD ---------------- //
 
 // GET /api/links/public - fetch all public/active links (for community browsing)
 app.get('/api/links/public', authenticate, async (req, res) => {
@@ -117,7 +137,6 @@ app.get('/api/links', authenticate, async (req, res) => {
   }
 });
 
-
 // GET /api/links/:slug - fetch a single link with rule checks
 app.get('/api/links/:slug', async (req, res) => {
   try {
@@ -132,9 +151,15 @@ app.get('/api/links/:slug', async (req, res) => {
 
     // EXPIRY CHECK
     if (link.expiresAt && now > link.expiresAt) {
-      if (link.status !== 'expired') {
+      const wasExpired = link.status === 'expired';
+      if (!wasExpired) {
         link.status = 'expired';
         await link.save();
+
+        sendWebhook(link, 'expired', {
+          reason: 'time_expired',
+          source: 'status_check',
+        });
       }
       return res.status(200).json({
         status: 'expired',
@@ -145,9 +170,15 @@ app.get('/api/links/:slug', async (req, res) => {
     // CLICK LIMIT CHECK
     const effectiveLimit = link.isOneTime ? 1 : link.maxClicks || 0;
     if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
-      if (link.status !== 'expired') {
+      const wasExpired = link.status === 'expired';
+      if (!wasExpired) {
         link.status = 'expired';
         await link.save();
+
+        sendWebhook(link, 'expired', {
+          reason: 'max_clicks_status_check',
+          source: 'status_check',
+        });
       }
       return res.status(200).json({
         status: 'expired',
@@ -177,8 +208,11 @@ app.get('/api/links/:slug', async (req, res) => {
 // POST /api/links - create a new short link (protected + rate limited)
 app.post('/api/links', authenticate, linkCreationLimiter, async (req, res) => {
   try {
+    console.log('POST /api/links body:', req.body); // 🔍 debug
+
     const {
       url,
+      targetUrl,
       slug,
       title,
       password,
@@ -189,12 +223,26 @@ app.post('/api/links', authenticate, linkCreationLimiter, async (req, res) => {
       collection,
       scheduleStart,
       creatorName,
-       ownerEmail,
+      ownerEmail,
+      conditionalRedirect,
+      webhookConfig,
+      visibility,
     } = req.body || {};
 
-    if (!url) {
-      return res.status(400).json({ message: 'url is required' });
+    // accept either `url` or `targetUrl`
+    const finalUrl = (url || targetUrl || '').trim();
+
+    if (!finalUrl) {
+      return res
+        .status(400)
+        .json({ message: 'destination url is required' }); // 🔴 new text
     }
+    const finalVisibility =
+  visibility === 'private' ? 'private' : 'public';
+
+
+    // 🧠 run heuristic safety scan for this URL
+    const safety = basicUrlSafetyCheck(finalUrl);
 
     // slug handling
     let finalSlug;
@@ -217,9 +265,9 @@ app.post('/api/links', authenticate, linkCreationLimiter, async (req, res) => {
     const now = new Date();
 
     const newLink = await Link.create({
-      title: title || url,
+      title: title || finalUrl,
       slug: finalSlug,
-      targetUrl: url,
+      targetUrl: finalUrl,
       clicks: 0,
       status: 'active',
       createdAt: now,
@@ -234,6 +282,21 @@ app.post('/api/links', authenticate, linkCreationLimiter, async (req, res) => {
       creatorName: creatorName || 'Anonymous',
       ownerEmail: ownerEmail || null,
       isFavorite: false,
+
+       visibility: finalVisibility,
+
+      conditionalRedirect: conditionalRedirect || undefined,
+      webhookConfig: webhookConfig || undefined,
+
+      // 🧠 store safety result
+      safetyScore: safety.score,
+      safetyVerdict: safety.verdict,
+      isFlagged: safety.flagRecommended,
+      flagReason: safety.flagRecommended
+        ? 'auto_flag_safety_scanner'
+        : null,
+      flaggedAt: safety.flagRecommended ? now : null,
+      moderationStatus: safety.flagRecommended ? 'flagged' : 'clean',
     });
 
     return res.status(201).json(newLink);
@@ -257,6 +320,8 @@ app.put('/api/links/:id', authenticate, async (req, res) => {
       showPreview,
       collection,
       creatorName,
+      conditionalRedirect,
+      webhookConfig,
     } = req.body || {};
 
     const link = await Link.findById(id);
@@ -280,6 +345,17 @@ app.put('/api/links/:id', authenticate, async (req, res) => {
     if (showPreview !== undefined) link.showPreview = !!showPreview;
     if (collection !== undefined) link.collection = collection;
     if (creatorName !== undefined) link.creatorName = creatorName;
+    if (conditionalRedirect !== undefined) {
+      link.conditionalRedirect = conditionalRedirect;
+    }
+    if (webhookConfig !== undefined) {
+      link.webhookConfig = webhookConfig;
+    }
+    if (visibility !== undefined) {
+  link.visibility =
+    visibility === 'private' ? 'private' : 'public';
+}
+
 
     const updated = await link.save();
     return res.status(200).json(updated);
@@ -347,104 +423,139 @@ function getDeviceType(userAgent = '') {
   return 'desktop';
 }
 
-// REAL REDIRECT ENDPOINT + analytics logging (rate limited to prevent bot abuse)
+// ---- helper: choose conditional redirect target ----
+function chooseConditionalTarget(link, deviceType, now, clickCount) {
+  const rules = link.conditionalRedirect;
+  if (!rules || !rules.enabled) return null;
+
+  if (rules.deviceRules) {
+    const d = (deviceType || '').toLowerCase();
+    if (d === 'mobile' && rules.deviceRules.mobileUrl) return rules.deviceRules.mobileUrl;
+    if (d === 'desktop' && rules.deviceRules.desktopUrl) return rules.deviceRules.desktopUrl;
+    if (d === 'tablet' && rules.deviceRules.tabletUrl) return rules.deviceRules.tabletUrl;
+    if (d === 'bot' && rules.deviceRules.botUrl) return rules.deviceRules.botUrl;
+  }
+
+  if (rules.dayTypeRules) {
+    const day = now.getDay();
+    const isWeekend = day === 0 || day === 6;
+    if (isWeekend && rules.dayTypeRules.weekendUrl) return rules.dayTypeRules.weekendUrl;
+    if (!isWeekend && rules.dayTypeRules.weekdayUrl) return rules.dayTypeRules.weekdayUrl;
+  }
+
+  if (Array.isArray(rules.timeOfDayRules)) {
+    const hour = now.getHours();
+    for (const win of rules.timeOfDayRules) {
+      if (!win.url) continue;
+      if (
+        (win.startHour <= win.endHour && hour >= win.startHour && hour < win.endHour) ||
+        (win.startHour > win.endHour && (hour >= win.startHour || hour < win.endHour))
+      ) {
+        return win.url;
+      }
+    }
+  }
+
+  if (Array.isArray(rules.clickRules)) {
+    for (const r of rules.clickRules) {
+      const min = typeof r.minClicks === 'number' ? r.minClicks : 0;
+      const max = typeof r.maxClicks === 'number' ? r.maxClicks : null;
+      if (clickCount >= min && (max === null || clickCount <= max)) {
+        return r.url;
+      }
+    }
+  }
+
+  return null;
+}
+
+// ---- helper: send webhook ----
+function sendWebhook(link, eventType, extra = {}) {
+  const cfg = link.webhookConfig;
+  if (!cfg || !cfg.enabled || !cfg.url) return;
+
+  let urlObj;
+  try {
+    urlObj = new URL(cfg.url);
+  } catch {
+    return;
+  }
+
+  const payload = JSON.stringify({
+    event: eventType,
+    slug: link.slug,
+    clicks: link.clicks,
+    occurredAt: new Date().toISOString(),
+    ...extra,
+  });
+
+  const client = urlObj.protocol === 'https:' ? https : http;
+  const req = client.request(
+    {
+      hostname: urlObj.hostname,
+      port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+      path: urlObj.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    },
+    () => {}
+  );
+
+  req.write(payload);
+  req.end();
+}
+
+// ✅ REAL REDIRECT ENDPOINT (SAME LOGIC, CONFLICT-FREE)
 app.get('/r/:slug', redirectLimiter, async (req, res) => {
   try {
-    const { slug } = req.params;
-    const link = await Link.findOne({ slug });
-
-    if (!link) {
-      return res.status(404).send('Deadman-Link: Not found');
-    }
+    const link = await Link.findOne({ slug: req.params.slug });
+    if (!link) return res.status(404).send('Deadman-Link: Not found');
 
     const now = new Date();
 
-    // expiry check
     if (link.expiresAt && now > link.expiresAt) {
       if (link.status !== 'expired') {
         link.status = 'expired';
         await link.save();
+        sendWebhook(link, 'expired', { reason: 'time_expired' });
       }
-      return res
-        .status(410)
-        .send('Deadman-Link: This link has self-destructed (expired).');
+      return res.status(410).send('Deadman-Link: Expired');
     }
 
-    // schedule check
     if (link.scheduleStart && now < link.scheduleStart) {
-      return res
-        .status(403)
-        .send('Deadman-Link: This link is not active yet.');
+      return res.status(403).send('Deadman-Link: Not active yet');
     }
 
-    // click limit check
-    const effectiveLimit = link.isOneTime ? 1 : link.maxClicks || 0;
-    if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
-      if (link.status !== 'expired') {
-        link.status = 'expired';
-        await link.save();
-      }
-      return res
-        .status(410)
-        .send(
-          'Deadman-Link: This link has reached its maximum allowed clicks.'
-        );
+    const limit = link.isOneTime ? 1 : link.maxClicks || 0;
+    if (limit > 0 && link.clicks >= limit) {
+      return res.status(410).send('Deadman-Link: Click limit reached');
     }
-
-    // increment clicks + possibly expire
-    link.clicks += 1;
-    if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
-      link.status = 'expired';
-    }
-    await link.save();
-
-    // ---- log analytics event (non-blocking) ----
-    const ipRaw =
-      req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
-    const ip = Array.isArray(ipRaw)
-      ? ipRaw[0]
-      : ipRaw.split(',')[0].trim();
 
     const userAgent = req.headers['user-agent'] || '';
     const deviceType = getDeviceType(userAgent);
+    const nextClicks = link.clicks + 1;
 
-    // Try to get country from headers first (Cloudflare, etc.)
-    let country = req.headers['cf-ipcountry'] || req.headers['x-country'];
+    let finalTarget = link.targetUrl;
+    const conditional = chooseConditionalTarget(link, deviceType, now, nextClicks);
+    if (conditional) finalTarget = conditional;
 
-    // If not available, use IP geolocation API for local/testing
-    if (!country && ip && ip !== '::1' && ip !== '127.0.0.1') {
-      try {
-        const geoResponse = await fetch(`http://ip-api.com/json/${ip}?fields=country`);
-        const geoData = await geoResponse.json();
-        country = geoData.country || 'Unknown';
-      } catch (geoErr) {
-        console.log('Geolocation lookup failed:', geoErr.message);
-        country = 'Unknown';
-      }
-    } else if (!country) {
-      country = 'Local';
+    link.clicks = nextClicks;
+    await link.save();
+
+    if (nextClicks === 1) {
+      sendWebhook(link, 'first_click');
     }
 
-    try {
-      await AnalyticsEvent.create({
-        link: link._id,
-        slug: link.slug,
-        ip,
-        userAgent,
-        deviceType,
-        country,
-      });
-    } catch (logErr) {
-      console.error('Failed to log analytics event:', logErr.message);
-      // do NOT block redirect
-    }
-
-    return res.redirect(link.targetUrl);
+    return res.redirect(finalTarget);
   } catch (err) {
-    console.error('Error in GET /r/:slug:', err);
-    res.status(500).send('Deadman-Link: Internal server error.');
+    console.error(err);
+    res.status(500).send('Deadman-Link: Internal server error');
   }
 });
+
 
 // ---------------- SOCKET.IO ---------------- //
 
@@ -460,6 +571,7 @@ const io = new Server(server, {
 // expose io to all routes via req.app.get('io')
 app.set('io', io);
 
+<<<<<<< HEAD
 
 // Track user activity
 const activeUsers = new Map(); // userId -> { socketId, lastActivity }
@@ -493,6 +605,8 @@ setInterval(async () => {
   }
 }, 30000);
 
+=======
+>>>>>>> 23dc5ef73f5ce6fc11471e595184990d568bc60d
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
 

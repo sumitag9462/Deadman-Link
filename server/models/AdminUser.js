@@ -29,6 +29,9 @@ const PrivacySettingsSchema = new mongoose.Schema(
   {
     showCreatorName: { type: Boolean, default: true },
     enableReferrerTracking: { type: Boolean, default: true },
+
+    // NEW: whether this user's links can be suggested to others
+    allowLinkSuggestions: { type: Boolean, default: true },
   },
   { _id: false }
 );

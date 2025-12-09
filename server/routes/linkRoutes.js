@@ -2,79 +2,105 @@
 const express = require('express');
 const router = express.Router();
 const Link = require('../models/Link');
-const crypto = require('crypto');
+const AdminUser = require('../models/AdminUser');
+const { scoreSimilarity } = require('../utils/linkSimilarity');
 
-// simple slug generator
-async function generateUniqueSlug(customSlug) {
-  if (customSlug) {
-    const exists = await Link.findOne({ slug: customSlug });
-    if (exists) throw new Error('Slug already in use');
-    return customSlug;
-  }
-
-  let slug;
-  let exists = true;
-  while (exists) {
-    slug = crypto.randomBytes(3).toString('hex'); // 6-char slug
-    exists = await Link.findOne({ slug });
-  }
-  return slug;
-}
-
-// POST /api/links  -> create link
-router.post('/', async (req, res) => {
+/**
+ * GET /api/links/similar
+ *
+ * Query:
+ *   url / targetUrl / link   -> destination URL to compare against
+ *   title?                   -> optional title from form
+ *   metaDescription?         -> optional description from form
+ *   ownerEmail?              -> current user email (so we don't show own links)
+ */
+router.get('/similar', async (req, res) => {
   try {
-    const {
-      targetUrl,
-      slug,
-      title,
-      password,
-      maxClicks,
-      expiresAt,
-      showPreview,
-      collection,
-      scheduleStart,
-    } = req.body;
+    let { url, targetUrl, link, title, metaDescription, ownerEmail } =
+      req.query;
 
-    if (!targetUrl) {
-      return res.status(400).json({ message: 'targetUrl is required' });
+    // accept multiple possible param names and don't hard-error
+    const finalUrl = (url || targetUrl || link || '').trim();
+
+    // if nothing valid, just say "no suggestions" instead of 400
+    if (!finalUrl) {
+      return res.json([]);
     }
 
-    // normalize maxClicks
-    let finalMaxClicks = null;
-    if (maxClicks !== null && maxClicks !== undefined && maxClicks !== 0) {
-      const num = Number(maxClicks);
-      if (!Number.isInteger(num) || num <= 0) {
-        return res
-          .status(400)
-          .json({ message: 'maxClicks must be a positive integer or 0' });
-      }
-      finalMaxClicks = num;
+    const targetLink = {
+      targetUrl: finalUrl,
+      title: title || '',
+      metaDescription: metaDescription || '',
+    };
+
+    // only consider public, non-removed links as candidates
+    const candidates = await Link.find({
+  moderationStatus: { $ne: 'removed' },
+  $or: [
+    { visibility: 'public' },              // new, explicitly public
+    { visibility: { $exists: false } },     // old docs without field → treat as public
+  ],
+})
+  .limit(500)
+  .lean();
+
+    if (!candidates.length) {
+      return res.json([]);
     }
 
-    const finalSlug = await generateUniqueSlug(slug);
+    // build map: ownerEmail -> allowLinkSuggestions
+    const ownerEmails = [
+      ...new Set(candidates.map((l) => l.ownerEmail).filter(Boolean)),
+    ];
 
-    // TODO: real password hashing later (bcrypt)
-    const passwordHash = password ? `PLAIN:${password}` : null;
+    const users = ownerEmails.length
+      ? await AdminUser.find({ email: { $in: ownerEmails } }).lean()
+      : [];
 
-    const link = await Link.create({
-      slug: finalSlug,
-      targetUrl,
-      title,
-      passwordHash,
-      maxClicks: finalMaxClicks,
-      expiresAt: expiresAt ? new Date(expiresAt) : null,
-      showPreview: !!showPreview,
-      collection: collection || 'General',
-      scheduleStart: scheduleStart ? new Date(scheduleStart) : null,
+    const allowMap = new Map();
+    for (const u of users) {
+      const privacy = u.privacy || {};
+      const allow =
+        typeof privacy.allowLinkSuggestions === 'boolean'
+          ? privacy.allowLinkSuggestions
+          : true; // default: allowed
+      allowMap.set(u.email, allow);
+    }
+
+    const filtered = candidates.filter((linkDoc) => {
+      // don't suggest your own links back to you
+      if (ownerEmail && linkDoc.ownerEmail === ownerEmail) return false;
+
+      // system / anonymous links are allowed
+      if (!linkDoc.ownerEmail) return true;
+
+      const allow = allowMap.get(linkDoc.ownerEmail);
+      return allow !== false;
     });
 
-    res.status(201).json(link);
+    const scored = filtered
+      .map((linkDoc) => {
+        const { score, reasons } = scoreSimilarity(targetLink, linkDoc);
+        return { linkDoc, score, reasons };
+      })
+      .filter((item) => item.score >= 3) // ignore very weak matches
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+
+    return res.json(
+      scored.map((s) => ({
+        id: s.linkDoc._id,
+        slug: s.linkDoc.slug,
+        targetUrl: s.linkDoc.targetUrl,
+        title: s.linkDoc.title,
+        metaDescription: s.linkDoc.metaDescription,
+        visibility: s.linkDoc.visibility,
+        score: s.score,
+        reasons: s.reasons,
+      }))
+    );
   } catch (err) {
-    console.error(err);
-    if (err.message === 'Slug already in use') {
-      return res.status(409).json({ message: err.message });
-    }
+    console.error('Error in GET /api/links/similar:', err);
     res.status(500).json({ message: 'Internal server error' });
   }
 });

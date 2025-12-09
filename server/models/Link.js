@@ -74,8 +74,18 @@ const WebhookConfigSchema = new mongoose.Schema(
 const linkSchema = new mongoose.Schema(
   {
     title: { type: String },
+    // optional meta / description text – useful for similarity
+    metaDescription: { type: String, default: null },
+
     slug: { type: String, required: true, unique: true },
     targetUrl: { type: String, required: true },
+
+    // NEW: link visibility
+    visibility: {
+      type: String,
+      enum: ['public', 'private'],
+      default: 'public',
+    },
 
     password: { type: String, default: null },
     isOneTime: { type: Boolean, default: false },
@@ -84,6 +94,11 @@ const linkSchema = new mongoose.Schema(
     showPreview: { type: Boolean, default: false },
     collection: { type: String, default: 'General' },
     scheduleStart: { type: Date, default: null },
+     visibility: {
+      type: String,
+      enum: ['public', 'private'],
+      default: 'public',
+    },
 
     clicks: { type: Number, default: 0 },
     status: { type: String, default: 'active' },

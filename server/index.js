@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const http = require('http');
+const https = require('https'); // for webhook requests
 const { Server } = require('socket.io');
 require('dotenv').config();
 
@@ -13,9 +14,12 @@ const AnalyticsEvent = require('./models/AnalyticsEvent');
 const adminRoutes = require('./routes/adminRoutes');
 const adminLinkRoutes = require('./routes/adminLinkRoutes');
 const adminUserRoutes = require('./routes/adminUserRoutes');
+const settingsRoutes = require('./routes/settingsRoutes');
+const adminAuditRoutes = require('./routes/adminAuditRoutes');
+const securityRoutes = require('./routes/securityRoutes');
+const { basicUrlSafetyCheck } = require('./scripts/urlSafety');
 
 const app = express();
-// Default to a less common port to reduce local collisions
 const PORT = process.env.PORT || 5050;
 
 app.use(cors());
@@ -55,15 +59,23 @@ app.use('/api/admin', adminRoutes);
 // admin user access controls
 app.use('/api/admin/users', adminUserRoutes);
 
+// system settings
+app.use('/api/settings', settingsRoutes);
+
+// admin audit-log routes
+app.use('/api/admin/audit-logs', adminAuditRoutes);
+
+// security / URL scan API
+app.use('/api/security', securityRoutes);
+
+// ---------------- LINK CRUD ---------------- //
 
 // GET /api/links - list links, optionally filtered by ownerEmail
 app.get('/api/links', async (req, res) => {
   try {
     const { ownerEmail } = req.query;
-
     const query = {};
 
-    // If ownerEmail is provided, only return that user's links
     if (ownerEmail) {
       query.ownerEmail = ownerEmail;
     }
@@ -75,7 +87,6 @@ app.get('/api/links', async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
-
 
 // GET /api/links/:slug - fetch a single link with rule checks
 app.get('/api/links/:slug', async (req, res) => {
@@ -91,9 +102,15 @@ app.get('/api/links/:slug', async (req, res) => {
 
     // EXPIRY CHECK
     if (link.expiresAt && now > link.expiresAt) {
-      if (link.status !== 'expired') {
+      const wasExpired = link.status === 'expired';
+      if (!wasExpired) {
         link.status = 'expired';
         await link.save();
+
+        sendWebhook(link, 'expired', {
+          reason: 'time_expired',
+          source: 'status_check',
+        });
       }
       return res.status(200).json({
         status: 'expired',
@@ -104,9 +121,15 @@ app.get('/api/links/:slug', async (req, res) => {
     // CLICK LIMIT CHECK
     const effectiveLimit = link.isOneTime ? 1 : link.maxClicks || 0;
     if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
-      if (link.status !== 'expired') {
+      const wasExpired = link.status === 'expired';
+      if (!wasExpired) {
         link.status = 'expired';
         await link.save();
+
+        sendWebhook(link, 'expired', {
+          reason: 'max_clicks_status_check',
+          source: 'status_check',
+        });
       }
       return res.status(200).json({
         status: 'expired',
@@ -133,7 +156,7 @@ app.get('/api/links/:slug', async (req, res) => {
   }
 });
 
-// POST /api/links - create a new short link
+// POST /api/links - create a new short link (now with safety scan)
 app.post('/api/links', async (req, res) => {
   try {
     const {
@@ -148,12 +171,17 @@ app.post('/api/links', async (req, res) => {
       collection,
       scheduleStart,
       creatorName,
-       ownerEmail,
+      ownerEmail,
+      conditionalRedirect,
+      webhookConfig,
     } = req.body || {};
 
     if (!url) {
       return res.status(400).json({ message: 'url is required' });
     }
+
+    // 🧠 run heuristic safety scan for this URL
+    const safety = basicUrlSafetyCheck(url);
 
     // slug handling
     let finalSlug;
@@ -193,6 +221,19 @@ app.post('/api/links', async (req, res) => {
       creatorName: creatorName || 'Anonymous',
       ownerEmail: ownerEmail || null,
       isFavorite: false,
+
+      conditionalRedirect: conditionalRedirect || undefined,
+      webhookConfig: webhookConfig || undefined,
+
+      // 🧠 store safety result
+      safetyScore: safety.score,
+      safetyVerdict: safety.verdict,
+      isFlagged: safety.flagRecommended,
+      flagReason: safety.flagRecommended
+        ? 'auto_flag_safety_scanner'
+        : null,
+      flaggedAt: safety.flagRecommended ? now : null,
+      moderationStatus: safety.flagRecommended ? 'flagged' : 'clean',
     });
 
     return res.status(201).json(newLink);
@@ -216,6 +257,8 @@ app.put('/api/links/:id', async (req, res) => {
       showPreview,
       collection,
       creatorName,
+      conditionalRedirect,
+      webhookConfig,
     } = req.body || {};
 
     const link = await Link.findById(id);
@@ -223,7 +266,6 @@ app.put('/api/links/:id', async (req, res) => {
       return res.status(404).json({ message: 'Link not found' });
     }
 
-    // Update allowed fields
     if (title !== undefined) link.title = title;
     if (targetUrl !== undefined) link.targetUrl = targetUrl;
     if (password !== undefined) link.password = password || null;
@@ -234,6 +276,12 @@ app.put('/api/links/:id', async (req, res) => {
     if (showPreview !== undefined) link.showPreview = !!showPreview;
     if (collection !== undefined) link.collection = collection;
     if (creatorName !== undefined) link.creatorName = creatorName;
+    if (conditionalRedirect !== undefined) {
+      link.conditionalRedirect = conditionalRedirect;
+    }
+    if (webhookConfig !== undefined) {
+      link.webhookConfig = webhookConfig;
+    }
 
     const updated = await link.save();
     return res.status(200).json(updated);
@@ -289,6 +337,160 @@ function getDeviceType(userAgent = '') {
   return 'desktop';
 }
 
+// ---- helper: choose conditional redirect target ----
+function chooseConditionalTarget(link, deviceType, now, clickCount) {
+  const rules = link.conditionalRedirect;
+  if (!rules || !rules.enabled) return null;
+
+  // 1) Device-based rules
+  if (rules.deviceRules) {
+    const d = (deviceType || '').toLowerCase();
+    if (d === 'mobile' && rules.deviceRules.mobileUrl) {
+      return rules.deviceRules.mobileUrl;
+    }
+    if (d === 'desktop' && rules.deviceRules.desktopUrl) {
+      return rules.deviceRules.desktopUrl;
+    }
+    if (d === 'tablet' && rules.deviceRules.tabletUrl) {
+      return rules.deviceRules.tabletUrl;
+    }
+    if (d === 'bot' && rules.deviceRules.botUrl) {
+      return rules.deviceRules.botUrl;
+    }
+  }
+
+  // 2) Weekday / weekend rules
+  if (rules.dayTypeRules) {
+    const day = now.getDay(); // 0 = Sunday, 6 = Saturday
+    const isWeekend = day === 0 || day === 6;
+    if (isWeekend && rules.dayTypeRules.weekendUrl) {
+      return rules.dayTypeRules.weekendUrl;
+    }
+    if (!isWeekend && rules.dayTypeRules.weekdayUrl) {
+      return rules.dayTypeRules.weekdayUrl;
+    }
+  }
+
+  // 3) Time-of-day rules
+  if (Array.isArray(rules.timeOfDayRules) && rules.timeOfDayRules.length) {
+    const hour = now.getHours(); // 0–23
+    for (const win of rules.timeOfDayRules) {
+      if (
+        typeof win.startHour !== 'number' ||
+        typeof win.endHour !== 'number' ||
+        !win.url
+      ) {
+        continue;
+      }
+
+      if (win.startHour <= win.endHour) {
+        // simple case: [start, end)
+        if (hour >= win.startHour && hour < win.endHour) {
+          return win.url;
+        }
+      } else {
+        // wraps midnight, e.g. 22–3
+        if (hour >= win.startHour || hour < win.endHour) {
+          return win.url;
+        }
+      }
+    }
+  }
+
+  // 4) Click-count rules
+  if (Array.isArray(rules.clickRules) && rules.clickRules.length) {
+    for (const r of rules.clickRules) {
+      if (!r || !r.url) continue;
+      const min = typeof r.minClicks === 'number' ? r.minClicks : 0;
+      const max =
+        typeof r.maxClicks === 'number' ? r.maxClicks : null;
+
+      if (clickCount >= min && (max === null || clickCount <= max)) {
+        return r.url;
+      }
+    }
+  }
+
+  return null;
+}
+
+// ---- helper: send webhook (fire-and-forget, using http/https) ----
+function sendWebhook(link, eventType, extra = {}) {
+  const cfg = link.webhookConfig;
+  if (!cfg || !cfg.enabled || !cfg.url) return;
+
+  const triggers = cfg.triggers || {};
+
+  if (
+    (eventType === 'first_click' && !triggers.onFirstClick) ||
+    (eventType === 'expired' && !triggers.onExpiry) ||
+    (eventType === 'one_time_completed' &&
+      !triggers.onOneTimeComplete)
+  ) {
+    return;
+  }
+
+  let urlObj;
+  try {
+    urlObj = new URL(cfg.url);
+  } catch (e) {
+    console.error('Invalid webhook URL:', cfg.url, e.message);
+    return;
+  }
+
+  const payload = {
+    event: eventType,
+    linkId: link._id.toString(),
+    slug: link.slug,
+    targetUrl: link.targetUrl,
+    isOneTime: link.isOneTime,
+    maxClicks: link.maxClicks,
+    clicks: link.clicks,
+    status: link.status,
+    occurredAt: new Date().toISOString(),
+    ...extra,
+  };
+
+  const body = JSON.stringify(payload);
+
+  const isHttps = urlObj.protocol === 'https:';
+  const options = {
+    hostname: urlObj.hostname,
+    port: urlObj.port || (isHttps ? 443 : 80),
+    path: urlObj.pathname + (urlObj.search || ''),
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+    },
+  };
+
+  if (cfg.secret) {
+    options.headers['x-deadman-secret'] = cfg.secret;
+  }
+
+  const client = isHttps ? https : http;
+
+  console.log(
+    `📡 Sending webhook to ${cfg.url} [event=${eventType}]`
+  );
+
+  const req = client.request(options, (res) => {
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      console.error(
+        `Webhook responded with status ${res.statusCode} for ${cfg.url}`
+      );
+    }
+  });
+
+  req.on('error', (err) => {
+    console.error('Webhook call failed:', err.message);
+  });
+
+  req.write(body);
+  req.end();
+}
+
 // REAL REDIRECT ENDPOINT + analytics logging
 app.get('/r/:slug', async (req, res) => {
   try {
@@ -301,11 +503,17 @@ app.get('/r/:slug', async (req, res) => {
 
     const now = new Date();
 
-    // expiry check
+    // expiry check (time-based)
     if (link.expiresAt && now > link.expiresAt) {
-      if (link.status !== 'expired') {
+      const wasExpired = link.status === 'expired';
+      if (!wasExpired) {
         link.status = 'expired';
         await link.save();
+
+        sendWebhook(link, 'expired', {
+          reason: 'time_expired',
+          source: 'redirect',
+        });
       }
       return res
         .status(410)
@@ -319,12 +527,18 @@ app.get('/r/:slug', async (req, res) => {
         .send('Deadman-Link: This link is not active yet.');
     }
 
-    // click limit check
+    // click limit check BEFORE increment
     const effectiveLimit = link.isOneTime ? 1 : link.maxClicks || 0;
     if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
-      if (link.status !== 'expired') {
+      const wasExpired = link.status === 'expired';
+      if (!wasExpired) {
         link.status = 'expired';
         await link.save();
+
+        sendWebhook(link, 'expired', {
+          reason: 'max_clicks',
+          source: 'redirect_pre_click',
+        });
       }
       return res
         .status(410)
@@ -333,10 +547,30 @@ app.get('/r/:slug', async (req, res) => {
         );
     }
 
-    // increment clicks + possibly expire
-    link.clicks += 1;
+    const userAgent = req.headers['user-agent'] || '';
+    const deviceType = getDeviceType(userAgent);
+
+    const newClickCount = link.clicks + 1;
+    const isFirstClick = newClickCount === 1;
+    let expiredByLimitThisClick = false;
+
+    let finalTargetUrl = link.targetUrl;
+    const conditionalTarget = chooseConditionalTarget(
+      link,
+      deviceType,
+      now,
+      newClickCount
+    );
+    if (conditionalTarget) {
+      finalTargetUrl = conditionalTarget;
+    }
+
+    link.clicks = newClickCount;
     if (effectiveLimit > 0 && link.clicks >= effectiveLimit) {
-      link.status = 'expired';
+      if (link.status !== 'expired') {
+        link.status = 'expired';
+        expiredByLimitThisClick = true;
+      }
     }
     await link.save();
 
@@ -346,9 +580,6 @@ app.get('/r/:slug', async (req, res) => {
     const ip = Array.isArray(ipRaw)
       ? ipRaw[0]
       : ipRaw.split(',')[0].trim();
-
-    const userAgent = req.headers['user-agent'] || '';
-    const deviceType = getDeviceType(userAgent);
 
     const country =
       req.headers['cf-ipcountry'] ||
@@ -366,10 +597,33 @@ app.get('/r/:slug', async (req, res) => {
       });
     } catch (logErr) {
       console.error('Failed to log analytics event:', logErr.message);
-      // do NOT block redirect
     }
 
-    return res.redirect(link.targetUrl);
+    // ---- trigger webhooks based on events ----
+    if (isFirstClick) {
+      sendWebhook(link, 'first_click', {
+        source: 'redirect',
+        deviceType,
+        ip,
+        country,
+      });
+    }
+
+    if (expiredByLimitThisClick) {
+      sendWebhook(link, 'expired', {
+        reason: 'max_clicks',
+        source: 'redirect_post_click',
+      });
+
+      if (link.isOneTime) {
+        sendWebhook(link, 'one_time_completed', {
+          reason: 'click_limit_reached',
+          source: 'redirect',
+        });
+      }
+    }
+
+    return res.redirect(finalTargetUrl);
   } catch (err) {
     console.error('Error in GET /r/:slug:', err);
     res.status(500).send('Deadman-Link: Internal server error.');
@@ -389,7 +643,6 @@ const io = new Server(server, {
 
 // expose io to all routes via req.app.get('io')
 app.set('io', io);
-
 
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);

@@ -7,20 +7,25 @@ const router = express.Router();
 
 /**
  * POST /api/security/scan-url
- * Body: { url: "https://..." }
+ * Body can be: { url } OR { targetUrl } OR { link }
  * Returns: { score, verdict, reasons, flagRecommended, hostname }
  */
 router.post('/scan-url', (req, res) => {
   try {
-    const { url } = req.body || {};
-    if (!url || typeof url !== 'string') {
+    let { url, targetUrl, link } = req.body || {};
+
+    console.log('[/security/scan-url] raw body:', req.body);
+
+    const finalUrl = (url || targetUrl || link || '').trim();
+
+    if (!finalUrl || typeof finalUrl !== 'string') {
+      console.log('[/security/scan-url] missing url in body');
       return res
         .status(400)
-        .json({ message: 'url is required for safety scan' });
+        .json({ message: 'security-scan: url is required' }); // 👈 UNIQUE MESSAGE
     }
 
-    // use the same logic as link creation
-    const result = computeLinkSafetyForUrl(url);
+    const result = computeLinkSafetyForUrl(finalUrl);
     return res.json(result);
   } catch (err) {
     console.error('URL safety scan failed:', err);

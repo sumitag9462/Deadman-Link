@@ -1,5 +1,5 @@
 // src/components/links/CreateLinkForm.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import {
@@ -19,6 +19,10 @@ import toast from 'react-hot-toast';
 import api from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
 
+/* ===========================
+   CREATE LINK FORM
+   =========================== */
+
 export const CreateLinkForm = ({ onSuccess }) => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -28,6 +32,7 @@ export const CreateLinkForm = ({ onSuccess }) => {
     url: '',
     slug: '',
     title: '',
+    metaDescription: '',
     creatorName: '',
     password: '',
     isOneTime: false,
@@ -36,6 +41,7 @@ export const CreateLinkForm = ({ onSuccess }) => {
     showPreview: false,
     collection: 'General',
     scheduleStart: '',
+    visibility: 'public', // NEW
   });
 
   // 🔁 Dynamic rules state
@@ -75,10 +81,16 @@ export const CreateLinkForm = ({ onSuccess }) => {
   });
 
   // 🧠 Safety scanner state
-  // safety: { score, verdict, reasons, flagRecommended, hostname }
   const [safety, setSafety] = useState(null);
   const [safetyLoading, setSafetyLoading] = useState(false);
 
+  // 🔍 Similar links state
+  const [similarLinks, setSimilarLinks] = useState([]);
+  const [similarLoading, setSimilarLoading] = useState(false);
+
+  /* --------------------------
+     SAFETY SCAN
+     -------------------------- */
   const handleScanSafety = async () => {
     const url = form.url.trim();
 
@@ -94,12 +106,9 @@ export const CreateLinkForm = ({ onSuccess }) => {
 
     try {
       setSafetyLoading(true);
-      // clear previous result while scanning
       setSafety(null);
 
       const res = await api.post('/security/scan-url', { url });
-      // Optional: debug what backend is giving
-      // console.log('Safety scan result:', res.data);
       setSafety(res.data);
     } catch (err) {
       console.error('Safety scan error:', err);
@@ -111,10 +120,54 @@ export const CreateLinkForm = ({ onSuccess }) => {
     }
   };
 
+  /* --------------------------
+     LEVEL-2 SIMILARITY FETCH
+     -------------------------- */
+  useEffect(() => {
+    const url = form.url.trim();
+
+    if (!url) {
+      setSimilarLinks([]);
+      return;
+    }
+
+    // Only check when a proper URL is there
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      setSimilarLinks([]);
+      return;
+    }
+
+    const timeout = setTimeout(async () => {
+      try {
+        setSimilarLoading(true);
+
+        const res = await api.get('/links/similar', {
+          params: {
+            url,
+            title: (form.title || '').trim(),
+            metaDescription: (form.metaDescription || '').trim(),
+            ownerEmail: user?.email || undefined, // so backend can exclude own links
+          },
+        });
+
+        setSimilarLinks(res.data || []);
+      } catch (err) {
+        console.error('Error fetching similar links:', err);
+        // quiet fail is fine here
+      } finally {
+        setSimilarLoading(false);
+      }
+    }, 600); // debounce
+
+    return () => clearTimeout(timeout);
+  }, [form.url, form.title, form.metaDescription, user?.email]);
+
+  /* --------------------------
+     CREATE LINK SUBMIT
+     -------------------------- */
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Basic validation
     if (!form.url.trim()) {
       toast.error('Destination URL is required');
       return;
@@ -132,17 +185,13 @@ export const CreateLinkForm = ({ onSuccess }) => {
     setLoading(true);
 
     try {
-      // normalize maxClicks for backend:
-      // - if one-time -> 1
-      // - else if >0 -> value
-      // - else -> 0 (unlimited)
       const normalizedMaxClicks = form.isOneTime
         ? 1
         : form.maxClicks > 0
         ? form.maxClicks
         : 0;
 
-      // 🧠 build conditionalRedirect from dynamic rules state
+      // build conditionalRedirect from dynamic rules state
       let conditionalRedirect;
       if (conditionalRedirectEnabled) {
         conditionalRedirect = {
@@ -185,7 +234,7 @@ export const CreateLinkForm = ({ onSuccess }) => {
         };
       }
 
-      // 🌐 build webhookConfig if enabled
+      // webhookConfig
       let webhookConfig;
       if (webhookEnabled && webhookUrl.trim()) {
         webhookConfig = {
@@ -202,9 +251,10 @@ export const CreateLinkForm = ({ onSuccess }) => {
 
       // Payload that matches backend POST /api/links
       const payload = {
-        url: form.url, // backend expects `url`
+        targetUrl: form.url, // backend uses targetUrl
         slug: form.slug || undefined,
         title: form.title || form.url,
+        metaDescription: form.metaDescription || undefined,
         creatorName:
           form.creatorName || user?.name || user?.email || 'Anonymous',
         password: form.password || undefined,
@@ -214,29 +264,27 @@ export const CreateLinkForm = ({ onSuccess }) => {
         showPreview: form.showPreview,
         collection: form.collection,
         scheduleStart: form.scheduleStart || undefined,
-        // tie link to the logged-in user
+        visibility: form.visibility,
         ownerEmail: user?.email || null,
         ...(conditionalRedirect ? { conditionalRedirect } : {}),
         ...(webhookConfig ? { webhookConfig } : {}),
       };
 
-      // Strip undefined so we don't send junk
       Object.keys(payload).forEach((key) => {
         if (payload[key] === undefined) delete payload[key];
       });
 
-      // Hit the actual backend route: POST /api/links
       const response = await api.post('/links', payload);
-
       const newLink = response.data;
 
       toast.success('Link encrypted & armed.');
 
-      // Reset form (keep collection default)
+      // Reset form
       setForm({
         url: '',
         slug: '',
         title: '',
+        metaDescription: '',
         creatorName: '',
         password: '',
         isOneTime: false,
@@ -245,9 +293,10 @@ export const CreateLinkForm = ({ onSuccess }) => {
         showPreview: false,
         collection: 'General',
         scheduleStart: '',
+        visibility: 'public',
       });
 
-      // Reset dynamic rules
+      // Reset everything else
       setConditionalRedirectEnabled(false);
       setDeviceRules({
         mobileUrl: '',
@@ -268,7 +317,6 @@ export const CreateLinkForm = ({ onSuccess }) => {
         url: '',
       });
 
-      // Reset webhook
       setWebhookEnabled(false);
       setWebhookUrl('');
       setWebhookSecret('');
@@ -278,8 +326,8 @@ export const CreateLinkForm = ({ onSuccess }) => {
         onOneTimeComplete: false,
       });
 
-      // Reset safety
       setSafety(null);
+      setSimilarLinks([]);
 
       if (onSuccess) onSuccess(newLink);
     } catch (error) {
@@ -294,13 +342,9 @@ export const CreateLinkForm = ({ onSuccess }) => {
     }
   };
 
-  // 🧠 Decide badge style + text based on safety score
-  // We treat score as 0–100 coming from backend and map to bands:
-  // 0         → NO OBVIOUS RISK (0%)
-  // 1–29      → LIGHT RISK (20%)
-  // 30–59     → MODERATE RISK (50%)
-  // 60–84     → HIGH RISK (75%)
-  // 85+       → OBVIOUSLY RISKY (100%)
+  /* --------------------------
+     SAFETY BADGE UI
+     -------------------------- */
   const renderSafetyBadge = () => {
     if (!safety) return null;
 
@@ -319,13 +363,11 @@ export const CreateLinkForm = ({ onSuccess }) => {
     let Icon = ShieldCheck;
 
     if (!hasReasons && rawScore === 0) {
-      // totally clean
       badgeClasses +=
         ' bg-emerald-500/10 text-emerald-300 border-emerald-500/60';
       label = 'NO OBVIOUS RISK';
       percentLabel = '0%';
     } else {
-      // some risk present – map raw score into buckets
       Icon = ShieldAlert;
 
       if (rawScore >= 85) {
@@ -362,6 +404,69 @@ export const CreateLinkForm = ({ onSuccess }) => {
     );
   };
 
+  /* --------------------------
+     SIMILAR LINKS PANEL
+     -------------------------- */
+  const renderSimilarLinks = () => {
+    const url = form.url.trim();
+    if (!url || !url.startsWith('http')) return null;
+
+    return (
+      <div className="mt-3 border border-slate-800 rounded-lg bg-slate-950/60 p-3 text-xs">
+        <div className="flex items-center justify-between mb-1">
+          <span className="font-medium text-slate-200">
+            Similar links already stored in Deadman
+          </span>
+          {similarLoading && (
+            <span className="text-[10px] text-slate-400">
+              Checking…
+            </span>
+          )}
+        </div>
+
+        {!similarLoading && similarLinks.length === 0 && (
+          <p className="text-[11px] text-slate-500">
+            No similar links found yet. This might be the first of its
+            kind.
+          </p>
+        )}
+
+        {similarLinks.length > 0 && (
+          <ul className="mt-1 space-y-2">
+            {similarLinks.map((item) => (
+              <li
+                key={item.id}
+                className="p-2 rounded border border-slate-800 bg-slate-900/70"
+              >
+                <div className="text-[11px] text-slate-300 font-medium truncate">
+                  {item.title || item.targetUrl}
+                </div>
+                <div className="text-[10px] text-slate-500 truncate">
+                  {item.targetUrl}
+                </div>
+                {item.reasons?.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {item.reasons.map((r) => (
+                      <span
+                        key={r}
+                        className="px-1.5 py-0.5 rounded-full bg-slate-800 text-[9px] uppercase tracking-wide text-slate-300"
+                      >
+                        {r.replace(/-/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
+  /* --------------------------
+     RENDER
+     -------------------------- */
   return (
     <div className="space-y-4">
       {/* Tabs */}
@@ -392,14 +497,14 @@ export const CreateLinkForm = ({ onSuccess }) => {
                 value={form.url}
                 onChange={(e) => {
                   setForm({ ...form, url: e.target.value });
-                  // clear previous safety result when URL changes
                   setSafety(null);
+                  setSimilarLinks([]);
                 }}
                 required
                 icon={<LinkIcon className="w-4 h-4" />}
               />
 
-              {/* Safety scan actions + badge */}
+              {/* Safety + suggestions */}
               <div className="flex flex-wrap items-center gap-3 mt-2">
                 <Button
                   type="button"
@@ -421,7 +526,6 @@ export const CreateLinkForm = ({ onSuccess }) => {
                 {renderSafetyBadge()}
               </div>
 
-              {/* Safety reasons list */}
               {safety &&
                 Array.isArray(safety.reasons) &&
                 safety.reasons.length > 0 && (
@@ -431,6 +535,8 @@ export const CreateLinkForm = ({ onSuccess }) => {
                     ))}
                   </ul>
                 )}
+
+              {renderSimilarLinks()}
             </div>
 
             <Input
@@ -439,6 +545,20 @@ export const CreateLinkForm = ({ onSuccess }) => {
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
             />
+
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">
+                Description (Optional)
+              </label>
+              <textarea
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500 min-h-[70px]"
+                placeholder="Short summary to help the system find similar links…"
+                value={form.metaDescription}
+                onChange={(e) =>
+                  setForm({ ...form, metaDescription: e.target.value })
+                }
+              />
+            </div>
 
             <Input
               label="Creator Name (Optional)"
@@ -455,7 +575,9 @@ export const CreateLinkForm = ({ onSuccess }) => {
                 label="Custom Slug"
                 placeholder="my-custom-link"
                 value={form.slug}
-                onChange={(e) => setForm({ ...form, slug: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, slug: e.target.value })
+                }
                 className="font-mono text-sm"
               />
 
@@ -479,6 +601,27 @@ export const CreateLinkForm = ({ onSuccess }) => {
                 </div>
               </div>
             </div>
+
+            {/* Visibility */}
+            <div className="relative">
+              <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">
+                Visibility
+              </label>
+              <select
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 text-sm"
+                value={form.visibility}
+                onChange={(e) =>
+                  setForm({ ...form, visibility: e.target.value })
+                }
+              >
+                <option value="public">
+                  Public – can be suggested to other users
+                </option>
+                <option value="private">
+                  Private – only you can access it
+                </option>
+              </select>
+            </div>
           </div>
         )}
 
@@ -499,7 +642,6 @@ export const CreateLinkForm = ({ onSuccess }) => {
                 <Flame className="w-4 h-4 text-orange-500" /> Destruction Rules
               </h4>
 
-              {/* One-time toggle */}
               <div className="flex items-center justify-between">
                 <span className="text-sm text-slate-400">
                   Burn after reading (1 view)
@@ -518,7 +660,6 @@ export const CreateLinkForm = ({ onSuccess }) => {
                 />
               </div>
 
-              {/* Multi-use limit */}
               {!form.isOneTime && (
                 <div className="space-y-2">
                   <label className="text-xs text-slate-500 uppercase">
@@ -539,7 +680,6 @@ export const CreateLinkForm = ({ onSuccess }) => {
                 </div>
               )}
 
-              {/* Expiry date */}
               <div className="space-y-2">
                 <label className="text-xs text-slate-500 uppercase">
                   Self-Destruct Date
@@ -587,7 +727,6 @@ export const CreateLinkForm = ({ onSuccess }) => {
                 </h4>
                 <p className="text-xs text-slate-400 mt-1">
                   Show a &quot;Proceed with Caution&quot; page before redirecting.
-                  Useful for warning users about sensitive content.
                 </p>
               </div>
             </div>
@@ -613,7 +752,7 @@ export const CreateLinkForm = ({ onSuccess }) => {
               </p>
             </div>
 
-            {/* 🔥 Dynamic redirect rules */}
+             {/* 🔥 Dynamic redirect rules */}
             <section className="mt-2 border border-slate-800 rounded-xl bg-slate-900">
               <header className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
                 <div>
@@ -1022,6 +1161,315 @@ export const CreateLinkForm = ({ onSuccess }) => {
         <div className="pt-4 border-t border-slate-800">
           <Button type="submit" isLoading={loading}>
             {loading ? 'Encrypting...' : 'Generate Deadman Link'}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+
+       
+
+/* ===========================
+   EDIT LINK FORM
+   =========================== */
+
+export const EditLinkForm = ({ link, onSuccess }) => {
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('basic');
+
+  const [form, setForm] = useState({
+    title: link.title || '',
+    targetUrl: link.targetUrl || '',
+    metaDescription: link.metaDescription || '',
+    creatorName: link.creatorName || '',
+    password: '',
+    isOneTime: link.isOneTime || false,
+    maxClicks: link.maxClicks || 0,
+    expiresAt: link.expiresAt ? link.expiresAt.slice(0, 16) : '',
+    showPreview: link.showPreview || false,
+    collection: link.collection || 'General',
+    visibility: link.visibility || 'public',
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!form.title.trim()) {
+      toast.error('Title is required');
+      return;
+    }
+
+    if (!form.targetUrl.trim()) {
+      toast.error('Target URL is required');
+      return;
+    }
+
+    if (
+      form.targetUrl &&
+      !form.targetUrl.startsWith('http://') &&
+      !form.targetUrl.startsWith('https://')
+    ) {
+      toast.error('URL must start with http:// or https://');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const payload = {
+        title: form.title,
+        targetUrl: form.targetUrl,
+        metaDescription: form.metaDescription || undefined,
+        creatorName: form.creatorName || undefined,
+        password: form.password || undefined,
+        isOneTime: form.isOneTime,
+        maxClicks: form.isOneTime ? 1 : form.maxClicks,
+        expiresAt: form.expiresAt || undefined,
+        showPreview: form.showPreview,
+        collection: form.collection,
+        visibility: form.visibility,
+      };
+
+      Object.keys(payload).forEach((key) => {
+        if (payload[key] === undefined) delete payload[key];
+      });
+
+      const response = await api.put(`/links/${link._id}`, payload);
+      toast.success('Link updated successfully!');
+
+      if (onSuccess) onSuccess(response.data);
+    } catch (error) {
+      console.error('Link update error:', error);
+      const errorMsg =
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to update link';
+      toast.error(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex border-b border-slate-800 mb-4">
+        {['basic', 'security', 'advanced'].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-sm font-medium capitalize transition-colors ${
+              activeTab === tab
+                ? 'text-emerald-500 border-b-2 border-emerald-500'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* BASIC TAB */}
+        {activeTab === 'basic' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-left-4">
+            <Input
+              label="Link Title"
+              placeholder="Operation Blackbriar"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              required
+            />
+
+            <Input
+              label="Target URL"
+              placeholder="https://target-website.com"
+              value={form.targetUrl}
+              onChange={(e) =>
+                setForm({ ...form, targetUrl: e.target.value })
+              }
+              required
+            />
+
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">
+                Description (Optional)
+              </label>
+              <textarea
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500 min-h-[70px]"
+                placeholder="Short description for this link"
+                value={form.metaDescription}
+                onChange={(e) =>
+                  setForm({ ...form, metaDescription: e.target.value })
+                }
+              />
+            </div>
+
+            <Input
+              label="Creator Name (Optional)"
+              placeholder="Your name or team"
+              value={form.creatorName}
+              onChange={(e) =>
+                setForm({ ...form, creatorName: e.target.value })
+              }
+              icon={<User className="w-4 h-4" />}
+            />
+
+            <div className="relative">
+              <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">
+                Collection
+              </label>
+              <div className="relative">
+                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <select
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-10 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 appearance-none"
+                  value={form.collection}
+                  onChange={(e) =>
+                    setForm({ ...form, collection: e.target.value })
+                  }
+                >
+                  <option value="General">General</option>
+                  <option value="Intel">Intel</option>
+                  <option value="Personal">Personal</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Visibility */}
+            <div className="relative">
+              <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">
+                Visibility
+              </label>
+              <select
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-slate-200 focus:outline-none focus:border-emerald-500 text-sm"
+                value={form.visibility}
+                onChange={(e) =>
+                  setForm({ ...form, visibility: e.target.value })
+                }
+              >
+                <option value="public">
+                  Public – can be suggested to other users
+                </option>
+                <option value="private">
+                  Private – only you can access it
+                </option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* SECURITY TAB */}
+        {activeTab === 'security' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
+            <Input
+              label="Password Protection"
+              type="password"
+              placeholder="Leave empty for public access"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              icon={<Lock className="w-4 h-4" />}
+            />
+
+            <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-lg space-y-4">
+              <h4 className="text-sm font-medium text-white flex items-center gap-2">
+                <Flame className="w-4 h-4 text-orange-500" /> Destruction Rules
+              </h4>
+
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-400">
+                  Burn after reading (1 view)
+                </span>
+                <input
+                  type="checkbox"
+                  className="accent-emerald-500 w-4 h-4"
+                  checked={form.isOneTime}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      isOneTime: e.target.checked,
+                      maxClicks: e.target.checked ? 1 : 0,
+                    })
+                  }
+                />
+              </div>
+
+              {!form.isOneTime && (
+                <div className="space-y-2">
+                  <label className="text-xs text-slate-500 uppercase">
+                    Max Access Count (0 = unlimited)
+                  </label>
+                  <input
+                    type="number"
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm"
+                    placeholder="e.g. 5 (0 for unlimited)"
+                    value={form.maxClicks}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        maxClicks: parseInt(e.target.value, 10) || 0,
+                      })
+                    }
+                  />
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-xs text-slate-500 uppercase">
+                  Self-Destruct Date
+                </label>
+                <div className="relative">
+                  <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <input
+                    type="datetime-local"
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-10 py-2 text-white text-sm [&::-webkit-calendar-picker-indicator]:invert"
+                    value={form.expiresAt}
+                    onChange={(e) =>
+                      setForm({ ...form, expiresAt: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ADVANCED TAB */}
+        {activeTab === 'advanced' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
+            <div
+              className="p-4 border border-slate-800 rounded-lg flex items-start gap-3 bg-slate-900/30 hover:border-emerald-500/50 transition-colors cursor-pointer"
+              onClick={() =>
+                setForm({ ...form, showPreview: !form.showPreview })
+              }
+            >
+              <div
+                className={`mt-1 w-5 h-5 rounded border flex items-center justify-center ${
+                  form.showPreview
+                    ? 'bg-emerald-500 border-emerald-500'
+                    : 'border-slate-600'
+                }`}
+              >
+                {form.showPreview && (
+                  <Eye className="w-3 h-3 text-slate-950" />
+                )}
+              </div>
+              <div>
+                <h4 className="text-sm font-medium text-white">
+                  Safe Preview Mode
+                </h4>
+                <p className="text-xs text-slate-400 mt-1">
+                  Show a &quot;Proceed with Caution&quot; page before
+                  redirecting.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="pt-4 border-t border-slate-800 flex gap-2">
+          <Button type="submit" isLoading={loading} className="flex-1">
+            {loading ? 'Updating...' : 'Update Link'}
           </Button>
         </div>
       </form>

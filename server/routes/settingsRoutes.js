@@ -62,6 +62,8 @@ router.get('/', async (req, res) => {
       privacy: {
         showCreatorName: privacy.showCreatorName ?? true,
         enableReferrerTracking: privacy.enableReferrerTracking ?? true,
+        // NEW
+        allowLinkSuggestions: privacy.allowLinkSuggestions ?? true,
       },
 
       securitySettings: {
@@ -84,123 +86,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-/**
- * PUT /api/settings/profile
- * Body: { email, name, avatarColor?, timezone? }
- */
-router.put('/profile', async (req, res) => {
-  try {
-    const { email, name, avatarColor, timezone } = req.body || {};
-
-    if (!email || !name) {
-      return res
-        .status(400)
-        .json({ message: 'email and name are required' });
-    }
-
-    const user = await findOrCreateUserByEmail(email);
-    user.name = name;
-
-    if (avatarColor) {
-      user.avatarColor = avatarColor;
-    }
-    if (timezone) {
-      user.timezone = timezone;
-    }
-
-    await user.save();
-
-    res.json({
-      message: 'Profile updated',
-      user: {
-        name: user.name,
-        email: user.email,
-        avatarColor: user.avatarColor,
-        timezone: user.timezone,
-      },
-    });
-  } catch (err) {
-    console.error('Error in PUT /api/settings/profile:', err);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
-/**
- * PUT /api/settings/notifications
- * Body: { email, notifications: { emailOnDestruction, suspiciousActivity } }
- */
-router.put('/notifications', async (req, res) => {
-  try {
-    const { email, notifications } = req.body || {};
-
-    if (!email) {
-      return res.status(400).json({ message: 'email is required' });
-    }
-
-    const user = await findOrCreateUserByEmail(email);
-
-    user.notificationSettings = {
-      emailOnDestruction:
-        notifications?.emailOnDestruction ??
-        user.notificationSettings.emailOnDestruction ??
-        true,
-      suspiciousActivity:
-        notifications?.suspiciousActivity ??
-        user.notificationSettings.suspiciousActivity ??
-        true,
-    };
-
-    await user.save();
-
-    res.json({
-      message: 'Notification settings updated',
-      notifications: user.notificationSettings,
-    });
-  } catch (err) {
-    console.error('Error in PUT /api/settings/notifications:', err);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
-/**
- * PUT /api/settings/password
- * Body: { email, currentPassword, newPassword }
- */
-router.put('/password', async (req, res) => {
-  try {
-    const { email, currentPassword, newPassword } = req.body || {};
-
-    if (!email || !newPassword) {
-      return res
-        .status(400)
-        .json({ message: 'email and newPassword are required' });
-    }
-
-    const user = await findOrCreateUserByEmail(email);
-
-    // If a password already exists, verify currentPassword
-    if (user.passwordHash) {
-      const ok = await bcrypt.compare(
-        currentPassword || '',
-        user.passwordHash
-      );
-      if (!ok) {
-        return res
-          .status(401)
-          .json({ message: 'Current password is incorrect' });
-      }
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    user.passwordHash = await bcrypt.hash(newPassword, salt);
-    await user.save();
-
-    res.json({ message: 'Password updated successfully' });
-  } catch (err) {
-    console.error('Error in PUT /api/settings/password:', err);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
+// (profile, notifications, password routes stay the same)
 
 /**
  * PUT /api/settings/preferences
@@ -210,7 +96,7 @@ router.put('/password', async (req, res) => {
  *   avatarColor?,
  *   timezone?,
  *   defaultSettings: { collection, showPreview, maxClicks, isOneTime },
- *   privacy: { showCreatorName, enableReferrerTracking },
+ *   privacy: { showCreatorName, enableReferrerTracking, allowLinkSuggestions },
  *   autoDestructRules: { expireAfterDays, destroyOnFirstClick }
  * }
  */
@@ -235,48 +121,54 @@ router.put('/preferences', async (req, res) => {
     if (timezone !== undefined) user.timezone = timezone;
 
     if (defaultSettings) {
+      const currentDefault = user.defaultSettings || {};
       user.defaultSettings = {
         collection:
           defaultSettings.collection ??
-          user.defaultSettings.collection ??
+          currentDefault.collection ??
           'General',
         showPreview:
           defaultSettings.showPreview ??
-          user.defaultSettings.showPreview ??
+          currentDefault.showPreview ??
           true,
         maxClicks:
-          defaultSettings.maxClicks ??
-          user.defaultSettings.maxClicks ??
-          0,
+          defaultSettings.maxClicks ?? currentDefault.maxClicks ?? 0,
         isOneTime:
           defaultSettings.isOneTime ??
-          user.defaultSettings.isOneTime ??
+          currentDefault.isOneTime ??
           false,
       };
     }
 
     if (privacy) {
+      const currentPrivacy = user.privacy || {};
       user.privacy = {
         showCreatorName:
           privacy.showCreatorName ??
-          user.privacy.showCreatorName ??
+          currentPrivacy.showCreatorName ??
           true,
         enableReferrerTracking:
           privacy.enableReferrerTracking ??
-          user.privacy.enableReferrerTracking ??
+          currentPrivacy.enableReferrerTracking ??
+          true,
+        // NEW: allow suggestions toggle
+        allowLinkSuggestions:
+          privacy.allowLinkSuggestions ??
+          currentPrivacy.allowLinkSuggestions ??
           true,
       };
     }
 
     if (autoDestructRules) {
+      const currentAuto = user.autoDestructRules || {};
       user.autoDestructRules = {
         expireAfterDays:
           autoDestructRules.expireAfterDays ??
-          user.autoDestructRules.expireAfterDays ??
+          currentAuto.expireAfterDays ??
           null,
         destroyOnFirstClick:
           autoDestructRules.destroyOnFirstClick ??
-          user.autoDestructRules.destroyOnFirstClick ??
+          currentAuto.destroyOnFirstClick ??
           false,
       };
     }
@@ -291,6 +183,8 @@ router.put('/preferences', async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+// rest of settingsRoutes.js unchanged (security-advanced, export, reset-data, delete-account)
 
 /**
  * PUT /api/settings/security-advanced

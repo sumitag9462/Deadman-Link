@@ -48,6 +48,7 @@ const Settings = () => {
   const [showCreatorName, setShowCreatorName] = useState(true);
   const [enableReferrerTracking, setEnableReferrerTracking] =
     useState(true);
+  const [allowLinkSuggestions, setAllowLinkSuggestions] = useState(true); // NEW
 
   // ---- auto-destruct ----
   const [autoExpireDays, setAutoExpireDays] = useState('');
@@ -65,7 +66,6 @@ const Settings = () => {
   const [loadingResetData, setLoadingResetData] = useState(false);
   const [loadingDeleteAccount, setLoadingDeleteAccount] = useState(false);
 
-  // (placeholder, currently not used visually)
   const [sessions, setSessions] = useState([]);
 
   // Fetch settings from backend on mount
@@ -104,6 +104,11 @@ const Settings = () => {
         setEnableReferrerTracking(
           priv.enableReferrerTracking !== undefined
             ? priv.enableReferrerTracking
+            : true
+        );
+        setAllowLinkSuggestions(
+          priv.allowLinkSuggestions !== undefined
+            ? priv.allowLinkSuggestions
             : true
         );
 
@@ -151,7 +156,6 @@ const Settings = () => {
         timezone,
       });
 
-      // update AuthContext so name changes everywhere
       login({
         ...user,
         name: res.data.user.name,
@@ -248,6 +252,7 @@ const Settings = () => {
         privacy: {
           showCreatorName,
           enableReferrerTracking,
+          allowLinkSuggestions, // NEW
         },
         autoDestructRules: {
           expireAfterDays:
@@ -292,7 +297,6 @@ const Settings = () => {
         params: { email: user.email },
       });
 
-      // create a downloadable JSON file
       const blob = new Blob([JSON.stringify(res.data, null, 2)], {
         type: 'application/json',
       });
@@ -346,8 +350,7 @@ const Settings = () => {
         data: { email: user.email },
       });
       toast.success('Account deleted');
-      // you might want to logout here:
-      // logout();
+      // logout() could go here
     } catch (err) {
       console.error('Failed to delete account', err);
       toast.error('Failed to delete account');

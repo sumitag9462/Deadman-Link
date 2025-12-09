@@ -18,6 +18,8 @@ const settingsRoutes = require('./routes/settingsRoutes');
 const adminAuditRoutes = require('./routes/adminAuditRoutes');
 const securityRoutes = require('./routes/securityRoutes');
 const { basicUrlSafetyCheck } = require('./scripts/urlSafety');
+const linkRoutes = require('./routes/linkRoutes');
+
 
 const app = express();
 const PORT = process.env.PORT || 5050;
@@ -67,6 +69,10 @@ app.use('/api/admin/audit-logs', adminAuditRoutes);
 
 // security / URL scan API
 app.use('/api/security', securityRoutes);
+
+// similarity / helper link routes
+app.use('/api/links', linkRoutes);
+
 
 // ---------------- LINK CRUD ---------------- //
 
@@ -159,8 +165,11 @@ app.get('/api/links/:slug', async (req, res) => {
 // POST /api/links - create a new short link (now with safety scan)
 app.post('/api/links', async (req, res) => {
   try {
+    console.log('POST /api/links body:', req.body); // 🔍 debug
+
     const {
       url,
+      targetUrl,
       slug,
       title,
       password,
@@ -174,14 +183,23 @@ app.post('/api/links', async (req, res) => {
       ownerEmail,
       conditionalRedirect,
       webhookConfig,
+      visibility,
     } = req.body || {};
 
-    if (!url) {
-      return res.status(400).json({ message: 'url is required' });
+    // accept either `url` or `targetUrl`
+    const finalUrl = (url || targetUrl || '').trim();
+
+    if (!finalUrl) {
+      return res
+        .status(400)
+        .json({ message: 'destination url is required' }); // 🔴 new text
     }
+    const finalVisibility =
+  visibility === 'private' ? 'private' : 'public';
+
 
     // 🧠 run heuristic safety scan for this URL
-    const safety = basicUrlSafetyCheck(url);
+    const safety = basicUrlSafetyCheck(finalUrl);
 
     // slug handling
     let finalSlug;
@@ -204,9 +222,9 @@ app.post('/api/links', async (req, res) => {
     const now = new Date();
 
     const newLink = await Link.create({
-      title: title || url,
+      title: title || finalUrl,
       slug: finalSlug,
-      targetUrl: url,
+      targetUrl: finalUrl,
       clicks: 0,
       status: 'active',
       createdAt: now,
@@ -221,6 +239,8 @@ app.post('/api/links', async (req, res) => {
       creatorName: creatorName || 'Anonymous',
       ownerEmail: ownerEmail || null,
       isFavorite: false,
+
+       visibility: finalVisibility,
 
       conditionalRedirect: conditionalRedirect || undefined,
       webhookConfig: webhookConfig || undefined,
@@ -242,6 +262,7 @@ app.post('/api/links', async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
 
 // PUT /api/links/:id - update link details
 app.put('/api/links/:id', async (req, res) => {
@@ -282,6 +303,11 @@ app.put('/api/links/:id', async (req, res) => {
     if (webhookConfig !== undefined) {
       link.webhookConfig = webhookConfig;
     }
+    if (visibility !== undefined) {
+  link.visibility =
+    visibility === 'private' ? 'private' : 'public';
+}
+
 
     const updated = await link.save();
     return res.status(200).json(updated);

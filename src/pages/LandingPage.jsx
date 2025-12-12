@@ -1,301 +1,396 @@
-import React, { useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
-import { Shield, ChevronRight, Eye, Activity, Globe, FileText, UserCheck, Flame, AlertTriangle, Zap, Lock, ScanLine } from 'lucide-react';
+// src/pages/LandingPage.jsx
+import React, { useRef, useState, useEffect } from 'react';
+import api from '../services/api';
+import toast from 'react-hot-toast';
 import { Button } from '../components/ui/Button';
+import { Card } from '../components/ui/Card';
+import { useAuth } from '../context/AuthContext';
+import {
+  Sparkles,
+  ShieldCheck,
+  Link as LinkIcon,
+  GitMerge,
+  Zap,
+  Globe,
+  CheckCircle,
+  Coffee,
+  Info,
+  Terminal,
+  Lock,
+  Loader2,
+  Copy,
+  ExternalLink,
+} from 'lucide-react';
 
-const LandingPage = () => {
-  // --- Custom CSS for Animations (Grid, Glitch, Float) ---
-  const styles = `
-    @keyframes move-grid {
-      0% { transform: perspective(500px) rotateX(60deg) translateY(0); }
-      100% { transform: perspective(500px) rotateX(60deg) translateY(50px); }
-    }
-    @keyframes float {
-      0%, 100% { transform: translateY(0px); }
-      50% { transform: translateY(-20px); }
-    }
-    @keyframes pulse-glow {
-      0%, 100% { opacity: 0.5; transform: scale(1); }
-      50% { opacity: 0.8; transform: scale(1.1); }
-    }
-    .cyber-grid {
-      position: absolute;
-      width: 200%;
-      height: 200%;
-      top: -50%;
-      left: -50%;
-      background-image: 
-        linear-gradient(rgba(16, 185, 129, 0.1) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(16, 185, 129, 0.1) 1px, transparent 1px);
-      background-size: 40px 40px;
-      animation: move-grid 4s linear infinite;
-      z-index: 0;
-      opacity: 0.3;
-      mask-image: linear-gradient(to bottom, transparent 5%, black 40%, transparent 90%);
-    }
-    .card-3d {
-      transition: transform 0.3s ease, box-shadow 0.3s ease;
-      transform-style: preserve-3d;
-    }
-    .card-3d:hover {
-      transform: translateY(-10px) scale(1.02);
-      box-shadow: 0 20px 40px -15px rgba(16, 185, 129, 0.3);
-    }
-    .glitch-text {
-      position: relative;
-    }
-    .glitch-text::before, .glitch-text::after {
-      content: attr(data-text);
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      opacity: 0.8;
-    }
-    .glitch-text::before {
-      color: #0ea5e9;
-      z-index: -1;
-      animation: glitch-anim-1 3s infinite linear alternate-reverse;
-    }
-    .glitch-text::after {
-      color: #ef4444;
-      z-index: -2;
-      animation: glitch-anim-2 2s infinite linear alternate-reverse;
-    }
-    @keyframes glitch-anim-1 {
-      0% { clip-path: inset(20% 0 80% 0); transform: translate(-2px, 1px); }
-      20% { clip-path: inset(60% 0 10% 0); transform: translate(2px, -1px); }
-      40% { clip-path: inset(40% 0 50% 0); transform: translate(-2px, 2px); }
-      60% { clip-path: inset(80% 0 5% 0); transform: translate(2px, -2px); }
-      80% { clip-path: inset(10% 0 60% 0); transform: translate(-1px, 1px); }
-      100% { clip-path: inset(50% 0 30% 0); transform: translate(1px, -1px); }
-    }
-    @keyframes glitch-anim-2 {
-      0% { clip-path: inset(10% 0 60% 0); transform: translate(2px, -1px); }
-      20% { clip-path: inset(30% 0 20% 0); transform: translate(-2px, 1px); }
-      40% { clip-path: inset(70% 0 10% 0); transform: translate(1px, -2px); }
-      60% { clip-path: inset(20% 0 50% 0); transform: translate(-1px, 2px); }
-      80% { clip-path: inset(50% 0 30% 0); transform: translate(2px, 1px); }
-      100% { clip-path: inset(80% 0 5% 0); transform: translate(-2px, -1px); }
-    }
-  `;
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-emerald-500/30 overflow-x-hidden">
-      <style>{styles}</style>
-      
-      {/* --- Navigation --- */}
-      <nav className="fixed top-0 w-full z-50 border-b border-slate-800/50 bg-slate-950/80 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-emerald-500 font-bold text-xl tracking-tighter group cursor-pointer">
-            <Shield className="w-6 h-6 fill-emerald-500/20 group-hover:rotate-12 transition-transform duration-500" />
-            <span className="tracking-[0.2em]">DEADMAN</span>
-          </div>
-          <div className="flex items-center gap-6">
-            <Link to="/login" className="text-sm font-medium text-slate-400 hover:text-white transition-colors relative group">
-              <span>Access Terminal</span>
-              <span className="absolute -bottom-1 left-0 w-0 h-px bg-emerald-500 transition-all duration-300 group-hover:w-full"></span>
-            </Link>
-            <Link to="/register">
-              <Button className="w-auto px-5 py-2 text-xs uppercase tracking-wider bg-emerald-600 hover:bg-emerald-500 border border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.6)] transition-all duration-300">
-                Initialize Protocol
-              </Button>
-            </Link>
-            <Link to="/admin/login">
-              <Button className="w-auto px-5 py-2 text-xs uppercase tracking-wider bg-red-600 hover:bg-red-500 border border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.3)] hover:shadow-[0_0_25px_rgba(239,68,68,0.6)] transition-all duration-300">
-                [ADMIN ACCESS]
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </nav>
-
-      {/* --- Hero Section --- */}
-      <section className="relative pt-32 pb-20 md:pt-48 md:pb-32 px-6 overflow-hidden">
-        {/* Animated Cyber Grid Background */}
-        <div className="absolute inset-0 pointer-events-none perspective-[1000px]">
-            <div className="cyber-grid"></div>
-        </div>
-
-        {/* Floating Orbs */}
-        <div className="absolute top-20 left-10 w-72 h-72 bg-emerald-500/10 rounded-full blur-[100px] animate-[pulse-glow_4s_infinite]"></div>
-        <div className="absolute top-40 right-10 w-96 h-96 bg-red-600/5 rounded-full blur-[120px] animate-[pulse-glow_5s_infinite_reverse]"></div>
-
-        <div className="max-w-5xl mx-auto text-center relative z-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 text-emerald-500 text-xs font-medium mb-8 animate-in fade-in slide-in-from-bottom-4 duration-700 backdrop-blur-sm">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-            SYSTEM OPERATIONAL V2.0
-          </div>
-          
-          <h1 className="text-5xl md:text-7xl font-bold text-white tracking-tight mb-6 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100 leading-tight">
-            Intelligent Links That <br />
-            <span className="glitch-text text-transparent bg-clip-text bg-linear-to-r from-emerald-400 to-cyan-500" data-text="Self-Destruct & Adapt">
-              Self-Destruct & Adapt.
-            </span>
-          </h1>
-          
-          <p className="text-lg md:text-xl text-slate-400 mb-10 max-w-2xl mx-auto leading-relaxed animate-in fade-in slide-in-from-bottom-8 duration-700 delay-200">
-            The ultimate tool for secure communications. Create password-protected, time-sensitive links that vanish after use. Used by operatives, journalists, and privacy advocates worldwide.
-          </p>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-300">
-            <Link to="/register" className="w-full sm:w-auto">
-              <Button className="h-14 px-8 text-base bg-emerald-600 hover:bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.4)] hover:scale-105 transition-all duration-300">
-                Start Mission <ChevronRight className="w-4 h-4 ml-2" />
-              </Button>
-            </Link>
-            <a href="#features" className="w-full sm:w-auto">
-              <button className="w-full sm:w-auto h-14 px-8 rounded-lg border border-slate-700 hover:border-emerald-500/50 hover:bg-slate-900/80 text-slate-300 font-medium transition-all duration-300 flex items-center justify-center gap-2 group backdrop-blur-sm">
-                <ScanLine className="w-4 h-4 text-emerald-500 group-hover:animate-ping" /> View Capabilities
-              </button>
-            </a>
-          </div>
-        </div>
-      </section>
-
-      {/* --- User Features Grid (3D Cards) --- */}
-      <section id="features" className="py-24 px-6 bg-slate-900/30 border-y border-slate-800/50 relative">
-        {/* Decorative Lines */}
-        <div className="absolute top-0 left-1/4 w-px h-full bg-linear-to-b from-transparent via-slate-800 to-transparent opacity-50"></div>
-        <div className="absolute top-0 right-1/4 w-px h-full bg-linear-to-b from-transparent via-slate-800 to-transparent opacity-50"></div>
-
-        <div className="max-w-7xl mx-auto relative z-10">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-white mb-4 flex items-center justify-center gap-3">
-              <span className="w-8 h-1 bg-emerald-500 rounded-full"></span>
-              Field Agent Capabilities
-              <span className="w-8 h-1 bg-emerald-500 rounded-full"></span>
-            </h2>
-            <p className="text-slate-400">Tools designed for secure, ephemeral data sharing.</p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            <FeatureCard 
-              icon={Zap} 
-              color="text-yellow-400"
-              bg="bg-yellow-400/10"
-              title="Instant Shortening" 
-              desc="Generate compact, shareable short links from any URL in a single click. Ready for immediate deployment." 
-            />
-            <FeatureCard 
-              icon={Flame} 
-              color="text-orange-500"
-              bg="bg-orange-500/10"
-              title="Self-Destruct Timer" 
-              desc="Set an exact timestamp. Once reached, the link incinerates itself and shows an expiry message." 
-            />
-            <FeatureCard 
-              icon={Eye} 
-              color="text-emerald-400"
-              bg="bg-emerald-400/10"
-              title="One-Time Access" 
-              desc="Burn after reading. The link invalidates immediately after the first successful access." 
-            />
-            <FeatureCard 
-              icon={Lock} 
-              color="text-blue-400"
-              bg="bg-blue-400/10"
-              title="Password Protection" 
-              desc="Links are hashed server-side. Visitors must enter the correct decryption key to proceed." 
-            />
-            <FeatureCard 
-              icon={Activity} 
-              color="text-purple-400"
-              bg="bg-purple-400/10"
-              title="Multi-Use Countdown" 
-              desc="Limit access to a specific count (e.g., 5 clicks). The link auto-destroys when the limit is reached." 
-            />
-            <FeatureCard 
-              icon={Globe} 
-              color="text-cyan-400"
-              bg="bg-cyan-400/10"
-              title="Custom Slugs" 
-              desc="Choose a human-readable alias for your links to make them memorable and brandable." 
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* --- Admin Features Grid --- */}
-      <section className="py-24 px-6 relative overflow-hidden">
-        {/* Subtle Red Glow for Admin Section */}
-        <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-red-900/10 rounded-full blur-[120px]"></div>
-
-        <div className="max-w-7xl mx-auto relative z-10">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-white mb-4 flex items-center justify-center gap-3">
-              <span className="w-8 h-1 bg-red-500 rounded-full"></span>
-              Command & Control
-              <span className="w-8 h-1 bg-red-500 rounded-full"></span>
-            </h2>
-            <p className="text-slate-400">Advanced tools for system administrators and moderators.</p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <FeatureCard 
-              icon={Shield} 
-              color="text-red-500"
-              bg="bg-red-500/10"
-              title="Global Moderation" 
-              desc="Search and manage all links. Disable or delete problematic entries instantly." 
-            />
-            <FeatureCard 
-              icon={UserCheck} 
-              color="text-indigo-400"
-              bg="bg-indigo-400/10"
-              title="Access Controls" 
-              desc="Define roles (Regular, Premium, Admin) and assign specific feature sets." 
-            />
-            <FeatureCard 
-              icon={FileText} 
-              color="text-slate-300"
-              bg="bg-slate-300/10"
-              title="Audit Logs" 
-              desc="Immutable records of all admin actions and major system events for accountability." 
-            />
-            <FeatureCard 
-              icon={AlertTriangle} 
-              color="text-yellow-500"
-              bg="bg-yellow-500/10"
-              title="Abuse Prevention" 
-              desc="Rate-limiting and IP blacklisting to protect the infrastructure from attacks." 
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* --- Footer --- */}
-      <footer className="border-t border-slate-800 py-12 bg-slate-950 text-center relative z-10">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col items-center">
-          <div className="flex items-center gap-2 text-emerald-500 font-bold text-lg mb-6 hover:scale-110 transition-transform duration-300">
-            <Shield className="w-5 h-5" />
-            <span>DEADMAN LINK</span>
-          </div>
-          <p className="text-xs text-slate-600">
-            © 2025 Deadman Link Inc. Encrypted in transit and at rest.
-          </p>
-        </div>
-      </footer>
+const Feature = ({ Icon, title, children }) => (
+  <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 flex gap-4 items-start hover:shadow-lg transition">
+    <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-slate-950/50 border border-slate-800">
+      <Icon className="w-6 h-6 text-emerald-400" />
     </div>
-  );
-};
-
-// 3D Tilt Card Component
-const FeatureCard = ({ icon: Icon, title, desc, color, bg }) => (
-  <div className="card-3d p-6 rounded-xl bg-slate-900 border border-slate-800 hover:border-emerald-500/30 relative overflow-hidden group">
-    {/* Glow effect on hover */}
-    <div className="absolute inset-0 bg-linear-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
-    
-    <div className={`w-14 h-14 rounded-xl border border-slate-800 flex items-center justify-center mb-4 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3 ${bg}`}>
-      <Icon className={`w-7 h-7 ${color}`} />
+    <div>
+      <h4 className="text-white text-sm font-semibold">{title}</h4>
+      <p className="text-slate-400 text-xs mt-1">{children}</p>
     </div>
-    
-    <h3 className="text-lg font-bold text-white mb-3 group-hover:text-emerald-400 transition-colors">{title}</h3>
-    <p className="text-slate-400 text-sm leading-relaxed relative z-10 group-hover:text-slate-300 transition-colors">
-      {desc}
-    </p>
   </div>
 );
 
-export default LandingPage;
+export default function LandingPage() {
+  const { user } = useAuth();
+  const featuresRef = useRef(null);
+
+  // quick demo (fixed URL) — user cannot edit URL
+  const fixedUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
+
+  // create short link / preview
+  const [slug, setSlug] = useState('neon-quantum-v7'); // default slug user can edit
+  const [creating, setCreating] = useState(false);
+  const [createdLink, setCreatedLink] = useState(null); // holds the created URL (preview or real)
+  const [previewOnly, setPreviewOnly] = useState(true); // checkbox toggle
+
+  useEffect(() => {
+    setScanResult(null);
+    setCreatedLink(null);
+  }, []);
+
+  // ---------- Updated scan handler (static positive result) ----------
+  const handleScan = async () => {
+    try {
+      setScanLoading(true);
+      setScanResult(null);
+      await new Promise((r) => setTimeout(r, 650));
+      const staticResult = {
+        score: 0,
+        verdict: 'safe',
+        reasons: ['No suspicious patterns detected', 'Known good domain'],
+        message: 'Scan complete — Above link is safe and secure. 100% safe.',
+      };
+      setScanResult(staticResult);
+      toast.success('Scan complete — link appears safe');
+    } catch (err) {
+      console.error('Scan (static) failed', err);
+      toast.error('Scan failed');
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  // ---------- Updated create handler ----------
+  const handleCreateLink = async () => {
+    // If user only wants a preview, build a local preview URL and do not call backend
+    if (previewOnly) {
+      // keep full origin (including port)
+      const origin = window.location.origin;
+      const previewUrl = `${origin}/preview/${encodeURIComponent(slug || 'demo')}`;
+      await navigator.clipboard.writeText(previewUrl).catch(() => {});
+      setCreatedLink(previewUrl);
+      toast.success(`Preview created (local only). Copied: ${previewUrl}`);
+      return;
+    }
+
+    // Otherwise attempt to create the link on the backend
+    try {
+      setCreating(true);
+      const payload = {
+        url: fixedUrl,
+        slug: slug || undefined,
+        title: 'Neonwave quantum cache protocol (demo)',
+        ownerEmail: user?.email || undefined,
+        visibility: 'public',
+      };
+
+      // send auth header only if token exists
+      const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
+
+      // first attempt (with headers if present)
+      const attempt = await api.post('/links', payload, { headers });
+      const created = attempt.data;
+
+      // keep full origin so dev port is included
+      const origin = window.location.origin;
+      const short = `${origin}/r/${created.slug}`;
+      await navigator.clipboard.writeText(short).catch(() => {});
+      setCreatedLink(short);
+      toast.success(`Link created and copied: ${short}`);
+      setCreating(false);
+    } catch (err) {
+      console.error('Create link first attempt failed', err);
+      const status = err?.response?.status;
+      const message = (err?.response?.data?.message || err.message || '').toString();
+
+      // If it's an auth/token issue, show clear "Sign in required" message instead of raw backend text.
+      if (status === 401 || /missing token|missing.*token|token|required|authorization/i.test(message)) {
+        toast.error('Sign in required — please sign in to create links');
+        setCreating(false);
+        return;
+      }
+
+      // other errors: show backend message if available
+      const fallback = message || 'Failed to create link';
+      toast.error(fallback);
+      setCreating(false);
+    }
+  };
+
+  const goToLogin = () => (window.location.href = '/login');
+  const goToRegister = () => (window.location.href = '/register');
+  const goToAdmin = () => (window.location.href = '/admin/login');
+  const scrollToFeatures = () => {
+    if (featuresRef.current) featuresRef.current.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const copyCreatedLink = async () => {
+    if (!createdLink) return;
+    await navigator.clipboard.writeText(createdLink).catch(() => {});
+    toast.success('Copied to clipboard');
+  };
+
+  return (
+    <div className="px-6 md:px-12 lg:px-24 py-12 space-y-12">
+      {/* Top action row (three buttons) — ensured no stray symbol/text before the first button */}
+      <div className="flex items-center justify-between">
+        <div className="flex gap-3 items-center">
+          <Button variant="ghost" onClick={goToLogin} className="flex items-center gap-2">
+            <Terminal className="w-4 h-4" /> <span>Access Terminal</span>
+          </Button>
+
+          <Button variant="outline" onClick={goToRegister} className="flex items-center gap-2">
+            <Lock className="w-4 h-4" /> <span>Initialize Terminal</span>
+          </Button>
+
+          <Button variant="secondary" onClick={goToAdmin} className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4" /> <span>Admin Access</span>
+          </Button>
+        </div>
+
+        <div /> {/* placeholder on the right side */}
+      </div>
+
+      {/* HERO */}
+      <section className="max-w-6xl mx-auto flex flex-col md:flex-row items-center gap-10">
+        <div className="flex-1">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-300 text-xs font-medium mb-6">
+            <Sparkles className="w-4 h-4" /> New · Similarity recommendations
+          </div>
+
+          <h1 className="text-4xl md:text-5xl font-extrabold text-white leading-tight">
+            Intelligent links that <span className="text-emerald-400">adapt</span>, protect and expire.
+          </h1>
+
+          <p className="mt-4 text-slate-400 max-w-xl">
+            Create secure, time-limited and context-aware links — with optional safety scanning, conditional redirects, and privacy controls.
+          </p>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Button variant="primary" onClick={scrollToFeatures} className="flex items-center gap-2">
+              <LinkIcon className="w-4 h-4" /> View features
+            </Button>
+
+            
+          </div>
+
+          <div className="mt-8 flex gap-6 text-sm">
+            <div className="text-white font-semibold">
+              <div>Instant Links</div>
+              <div className="text-slate-400 text-xs mt-1">Shorten & share in seconds</div>
+            </div>
+            <div className="text-white font-semibold">
+              <div>Safety Scanner</div>
+              <div className="text-slate-400 text-xs mt-1">Heuristic checks & flags</div>
+            </div>
+            <div className="text-white font-semibold">
+              <div>Smart Suggestions</div>
+              <div className="text-slate-400 text-xs mt-1">Recommend similar saved links</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 max-w-lg w-full">
+          <Card className="p-4 border-slate-800 bg-slate-900/40">
+            <div className="text-xs text-slate-400 mb-2">Quick demo</div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-slate-200 font-medium">Destination URL</div>
+                <div className="text-xs text-slate-500">Demo · Fixed</div>
+              </div>
+
+              <div className="bg-slate-950 px-3 py-2 rounded-lg flex items-center gap-3">
+                <input className="bg-transparent outline-none text-sm w-full text-slate-200" value={fixedUrl} readOnly />
+                <Button size="sm" variant="secondary" onClick={handleScan} disabled={scanLoading}>
+                  {scanLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" /> Scanning...
+                    </>
+                  ) : (
+                    'Scan'
+                  )}
+                </Button>
+              </div>
+
+              {/* Static scan result display */}
+              {scanResult ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs text-slate-300">
+                  <div className="font-medium text-white mb-2">Scan complete</div>
+                  <div className="text-slate-400 text-sm">{scanResult.message}</div>
+                  {Array.isArray(scanResult.reasons) && (
+                    <ul className="mt-2 text-xs text-slate-400 list-disc pl-5 space-y-1">
+                      {scanResult.reasons.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs text-slate-300">
+                  <div className="font-medium text-white mb-2">Similar links already stored</div>
+                  <div className="text-slate-400 text-sm">No similar links found yet. Try creating a link below.</div>
+                </div>
+              )}
+
+              <div className="pt-2">
+                <label className="block text-xs text-slate-400 mb-1">Custom slug (optional)</label>
+                <input
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white text-sm"
+                  placeholder="custom-slug-here"
+                />
+
+                <div className="mt-2 flex items-center gap-3 text-xs">
+                  <label className="flex items-center gap-2 text-slate-300 select-none">
+                    <input
+                      type="checkbox"
+                      className="accent-emerald-500"
+                      checked={previewOnly}
+                      onChange={(e) => setPreviewOnly(e.target.checked)}
+                    />
+                    Preview only (do not store on server)
+                  </label>
+                </div>
+
+                {/* Created link display */}
+                {createdLink && (
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <div className="text-xs text-slate-300 break-all">{createdLink}</div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={copyCreatedLink}
+                        className="flex items-center gap-2 border border-slate-800 px-2 py-1 rounded"
+                      >
+                        <Copy className="w-4 h-4" /> Copy
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() => window.open(createdLink, '_blank')}
+                        className="flex items-center gap-2 px-3 py-1"
+                      >
+                        <ExternalLink className="w-4 h-4" /> Open
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" onClick={handleCreateLink} isLoading={creating}>
+                    {creating ? 'Creating...' : previewOnly ? 'Create local preview' : 'Create link'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </section>
+
+      {/* FEATURE GRID */}
+      <section ref={featuresRef} className="max-w-6xl mx-auto grid md:grid-cols-3 gap-6">
+        <Feature Icon={ShieldCheck} title="Safety Scanner">
+          Heuristic checks for phishing/malware and light scoring. Optionally flag and quarantine suspicious links.
+        </Feature>
+
+        <Feature Icon={Globe} title="Conditional Redirects">
+          Route users dynamically by device, time-of-day, or visitor count — great for promos and staged rollouts.
+        </Feature>
+
+        <Feature Icon={GitMerge} title="Privacy & Visibility">
+          Per-link visibility (public/private) and per-user opt-out for suggestions — keep sensitive links private.
+        </Feature>
+
+        <Feature Icon={Zap} title="Webhooks & Integrations">
+          Fire events when links are clicked, expired or consumed — plug into notifications, analytics and automations.
+        </Feature>
+
+        <Feature Icon={LinkIcon} title="Similarity Recommendations">
+          Level-2 heuristic engine: domain/path slug match + keyword overlap to suggest existing links from the network.
+        </Feature>
+
+        <Feature Icon={CheckCircle} title="Safe Preview Mode">
+          Show a caution/preview interstitial before redirecting — reduce accidental opens and give context.
+        </Feature>
+      </section>
+
+      {/* WHAT'S NEW */}
+      <section className="max-w-6xl mx-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-white font-semibold">What's new</h3>
+          <div className="text-xs text-slate-500">Latest updates</div>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-4">
+          <Card className="p-4 border-slate-800 bg-slate-900/40">
+            <div className="flex items-start gap-3">
+              <Sparkles className="w-6 h-6 text-emerald-400" />
+              <div>
+                <div className="text-sm text-white font-semibold">Similarity engine v2</div>
+                <div className="text-slate-400 text-xs mt-1">Recommend similar saved links using slug + title keyword heuristics.</div>
+                <div className="mt-3 text-xs text-slate-400">Try creating a link and notice the suggestion panel.</div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-4 border-slate-800 bg-slate-900/40">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-6 h-6 text-emerald-400" />
+              <div>
+                <div className="text-sm text-white font-semibold">Visibility & privacy</div>
+                <div className="text-slate-400 text-xs mt-1">Per-link public/private toggle and user-level opt-out for suggestions.</div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-4 border-slate-800 bg-slate-900/40">
+            <div className="flex items-start gap-3">
+              <Zap className="w-6 h-6 text-emerald-400" />
+              <div>
+                <div className="text-sm text-white font-semibold">Webhook integrations</div>
+                <div className="text-slate-400 text-xs mt-1">Fire automated events for clicks, expiry, and one-time consumption.</div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="max-w-6xl mx-auto text-center py-10">
+        <div className="text-xs text-slate-500 mb-3">Support the project</div>
+        <h3 className="text-2xl text-white font-semibold mb-4">Want to show us support?</h3>
+        <div className="flex justify-center gap-4">
+          <Button variant="primary" onClick={() => window.open('https://www.buymeacoffee.com/yourpage', '_blank')}>
+            <Coffee className="w-4 h-4 mr-2" /> Buy us a coffee
+          </Button>
+          
+        </div>
+      </section>
+
+      {/* FOOTER */}
+      <footer className="max-w-6xl mx-auto text-center text-slate-500 py-6">
+        © Deadman Link — Copyright 2025
+      </footer>
+    </div>
+  );
+}

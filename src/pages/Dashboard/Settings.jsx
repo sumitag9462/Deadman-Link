@@ -25,8 +25,12 @@ const Settings = () => {
   // ---- profile/basic ----
   const [displayName, setDisplayName] = useState(user?.name || '');
   const [avatarColor, setAvatarColor] = useState('#10B981');
+  const [avatarImage, setAvatarImage] = useState(null); // data URL or public URL
   const [timezone, setTimezone] = useState('UTC');
   const [loadingProfile, setLoadingProfile] = useState(false);
+
+  // file upload helpers
+  const [fileUploading, setFileUploading] = useState(false);
 
   // ---- password ----
   const [currentPassword, setCurrentPassword] = useState('');
@@ -80,6 +84,7 @@ const Settings = () => {
 
         setDisplayName(res.data.name || user.name || '');
         setAvatarColor(res.data.avatarColor || '#10B981');
+        setAvatarImage(res.data.avatarImage || null);
         setTimezone(res.data.timezone || 'UTC');
 
         setEmailOnDestruction(
@@ -140,6 +145,7 @@ const Settings = () => {
     };
 
     fetchSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);
 
   // ---- handlers ----
@@ -154,19 +160,65 @@ const Settings = () => {
         name: displayName,
         avatarColor,
         timezone,
+        avatarImage, // may be null or string (data URL or public URL)
       });
 
-      login({
+      // update Auth context so header reflects new avatar/name immediately
+      const updatedUser = {
         ...user,
         name: res.data.user.name,
-      });
+        avatarColor: res.data.user.avatarColor,
+        avatarImage: res.data.user.avatarImage || null,
+        timezone: res.data.user.timezone,
+      };
+
+      // update context and localStorage and dispatch an event so any header/listener updates
+      login(updatedUser);
+      try {
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      } catch (e) {
+        // ignore storage errors
+      }
+      window.dispatchEvent(new Event('userUpdated'));
 
       toast.success('Profile updated');
     } catch (err) {
       console.error('Failed to update profile', err);
-      toast.error('Failed to update profile');
+      const msg = err?.response?.data?.message || 'Failed to update profile';
+      toast.error(msg);
     } finally {
       setLoadingProfile(false);
+    }
+  };
+
+  // file -> dataURL helper (client-side preview, stored in DB as data URL)
+  const handleFileChange = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setAvatarImage(e.target.result); // base64 data URL
+    };
+    reader.onerror = (e) => {
+      console.error('File read error', e);
+      toast.error('Failed to read file');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleUploadClick = async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    // small client-side limit
+    if (file.size > 1_200_000) {
+      toast.error('File too large (max ~1.2MB). Use smaller image.');
+      return;
+    }
+    setFileUploading(true);
+    try {
+      handleFileChange(file);
+      toast.success('Image loaded (preview) — remember to click Update Profile');
+    } finally {
+      setFileUploading(false);
     }
   };
 
@@ -366,11 +418,22 @@ const Settings = () => {
       {/* Profile */}
       <Card className="p-6 border-slate-800 bg-slate-900">
         <div className="flex items-center gap-4 mb-6">
+          {/* avatar: show image if set, otherwise colored circle */}
           <div
-            className="w-16 h-16 rounded-full flex items-center justify-center text-slate-950 text-2xl font-bold"
-            style={{ backgroundColor: avatarColor }}
+            className="w-16 h-16 rounded-full flex items-center justify-center text-slate-950 text-2xl font-bold overflow-hidden"
+            style={{
+              backgroundColor: avatarImage ? 'transparent' : avatarColor,
+            }}
           >
-            {displayName?.[0] || user?.name?.[0] || user?.email?.[0]}
+            {avatarImage ? (
+              <img
+                src={avatarImage}
+                alt="avatar"
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              (displayName?.[0] || user?.name?.[0] || user?.email?.[0])
+            )}
           </div>
           <div>
             <h3 className="text-white font-medium">
@@ -393,14 +456,18 @@ const Settings = () => {
               <label className="block text-xs text-slate-400 mb-1">
                 Avatar Color
               </label>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
                 {colorOptions.map((color) => (
                   <button
                     key={color}
                     type="button"
-                    onClick={() => setAvatarColor(color)}
-                    className={`w-8 h-8 rounded-full border-2 ${
-                      avatarColor === color
+                    onClick={() => {
+                      setAvatarColor(color);
+                      // clear image when user picks color (color takes effect)
+                      setAvatarImage(null);
+                    }}
+                    className={`w-8 h-8 rounded-full border-2 transition-transform ${
+                      avatarColor === color && !avatarImage
                         ? 'border-emerald-400 scale-110'
                         : 'border-slate-700'
                     }`}
@@ -422,6 +489,31 @@ const Settings = () => {
             </div>
           </div>
 
+          {/* Avatar upload */}
+          <div>
+            <label className="block text-xs text-slate-400 mb-2">
+              Avatar Image (optional)
+            </label>
+
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="inline-block">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleUploadClick}
+                  style={{ display: 'none' }}
+                />
+                <div className="inline-flex items-center gap-2 px-3 py-2 bg-slate-800 rounded cursor-pointer">
+                  Upload
+                </div>
+              </label>
+            </div>
+
+            <div className="mt-2 text-xs text-slate-400">
+              Upload an image. Image takes precedence over color. Remember to click "Update Profile" to persist.
+            </div>
+          </div>
+
           <Button
             className="w-fit"
             onClick={handleUpdateProfile}
@@ -431,6 +523,13 @@ const Settings = () => {
           </Button>
         </div>
       </Card>
+
+      {/* ...rest of page unchanged (omitted here for brevity, same as before) */}
+      {/* You can paste the rest of your original page below if you want full-file replacement. */}
+
+
+
+
 
       <div className="grid md:grid-cols-2 gap-6">
         {/* Security - Password */}

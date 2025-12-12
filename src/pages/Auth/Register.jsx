@@ -228,6 +228,24 @@ const Register = () => {
             <Link to="/login" className="text-emerald-400 hover:text-emerald-300 font-semibold transition-colors">
               Sign in
             </Link>
+            <div className="mt-4 flex items-center justify-between">
+  {/* Back to Landing Button */}
+  <button
+    onClick={() => (window.location.href = '/')}
+    className="text-slate-400 text-sm hover:text-slate-200 transition"
+  >
+    ← Back to landing
+  </button>
+
+  {/* Admin Access Link */}
+  <a
+    href="/admin"
+    className="text-slate-400 text-sm hover:text-slate-200 transition"
+  >
+    Admin access →
+  </a>
+</div>
+
           </p>
         </div>
       </Card>

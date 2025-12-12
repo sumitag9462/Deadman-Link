@@ -1,4 +1,3 @@
-// server/routes/settingsRoutes.js
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const AdminUser = require('../models/AdminUser');
@@ -45,6 +44,7 @@ router.get('/', async (req, res) => {
       name: user.name,
       email: user.email,
       avatarColor: user.avatarColor,
+      avatarImage: user.avatarImage || null, // include image if present
       timezone: user.timezone,
 
       notifications: {
@@ -86,7 +86,54 @@ router.get('/', async (req, res) => {
   }
 });
 
-// (profile, notifications, password routes stay the same)
+/**
+ * PUT /api/settings/profile
+ * Body: { email, name?, avatarColor?, timezone?, avatarImage? }
+ *
+ * avatarImage can be:
+ *  - a base64 data URL produced by the client (small images)
+ *  - or a public URL string
+ *
+ * Returns updated user object.
+ */
+router.put('/profile', async (req, res) => {
+  try {
+    const { email, name, avatarColor, timezone, avatarImage } = req.body || {};
+
+    if (!email) {
+      return res.status(400).json({ message: 'email is required' });
+    }
+
+    const user = await findOrCreateUserByEmail(email);
+
+    if (name !== undefined) user.name = name;
+    if (avatarColor !== undefined) user.avatarColor = avatarColor;
+    if (timezone !== undefined) user.timezone = timezone;
+
+    // If an avatarImage is provided (data URL or public URL) store it.
+    // Image takes precedence over color in UI.
+    if (avatarImage !== undefined) {
+      // Note: in production you'd normally validate size / strip metadata / upload to object storage.
+      user.avatarImage = avatarImage || null;
+    }
+
+    await user.save();
+
+    // Return the user object (omit sensitive fields)
+    const safeUser = {
+      email: user.email,
+      name: user.name,
+      avatarColor: user.avatarColor,
+      avatarImage: user.avatarImage || null,
+      timezone: user.timezone,
+    };
+
+    res.json({ message: 'Profile updated', user: safeUser });
+  } catch (err) {
+    console.error('Error in PUT /api/settings/profile:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
 
 /**
  * PUT /api/settings/preferences
@@ -184,7 +231,7 @@ router.put('/preferences', async (req, res) => {
   }
 });
 
-// rest of settingsRoutes.js unchanged (security-advanced, export, reset-data, delete-account)
+// (security-advanced, export, reset-data, delete-account) unchanged; copied below for completeness
 
 /**
  * PUT /api/settings/security-advanced
@@ -207,13 +254,9 @@ router.put('/security-advanced', async (req, res) => {
     if (securitySettings) {
       user.securitySettings = {
         notifyNewDevice:
-          securitySettings.notifyNewDevice ??
-          user.securitySettings.notifyNewDevice ??
-          true,
+          securitySettings.notifyNewDevice ?? user.securitySettings.notifyNewDevice ?? true,
         notifyFailedAttempt:
-          securitySettings.notifyFailedAttempt ??
-          user.securitySettings.notifyFailedAttempt ??
-          true,
+          securitySettings.notifyFailedAttempt ?? user.securitySettings.notifyFailedAttempt ?? true,
       };
     }
 

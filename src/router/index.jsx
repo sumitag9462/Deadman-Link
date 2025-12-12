@@ -1,4 +1,4 @@
-// File: src/router/index.jsx
+// src/router/index.jsx
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
@@ -12,9 +12,11 @@ import AdminRegister from '../pages/Auth/AdminRegister';
 
 // Public Pages
 import LandingPage from '../pages/LandingPage';
+import PreviewPage from '../pages/PreviewPage'; // preview UI (optional)
+import ClientRedirect from '../pages/Public/ClientRedirect'; // client-side /r/:slug preview redirect
 import RedirectHandler from '../pages/Public/RedirectHandler';
 import NotFound from '../pages/NotFound';
-import WatchRoom from '../pages/Public/WatchRoom'; // ✅ NEW
+import WatchRoom from '../pages/Public/WatchRoom';
 
 // User Dashboard
 import DashboardLayout from '../components/layout/DashboardLayout';
@@ -24,7 +26,7 @@ import Browse from '../pages/Dashboard/Browse';
 import MyReports from '../pages/Dashboard/MyReports';
 import Analytics from '../pages/Dashboard/Analytics';
 import Settings from '../pages/Dashboard/Settings';
-import WatchParty from '../pages/Dashboard/WatchParty'; // ✅ NEW
+import WatchParty from '../pages/Dashboard/WatchParty';
 
 // Admin Dashboard
 import AdminLayout from '../components/layout/AdminLayout';
@@ -47,8 +49,9 @@ const ProtectedRoute = ({ children }) => {
 const AdminRoute = ({ children }) => {
   const { user, loading } = useAuth();
   if (loading) return null;
+  // If not logged in or not admin, send to admin login (so admin flows are separate)
   if (!user || user.role !== 'admin') {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/admin/login" replace />;
   }
   return children;
 };
@@ -63,6 +66,15 @@ const AppRouter = () => {
       <Route path="/admin/login" element={<AdminLogin />} />
       <Route path="/admin/register" element={<AdminRegister />} />
       <Route path="/oauth/callback" element={<OAuthCallback />} />
+
+      {/* Public preview route (optional preview UI) */}
+      <Route path="/preview/:slug" element={<PreviewPage />} />
+
+      {/* Client-side local preview redirect (must be registered before generic slug) */}
+      <Route path="/r/:slug" element={<ClientRedirect />} />
+
+      {/* Public watch room */}
+      <Route path="/watch/:roomCode" element={<WatchRoom />} />
 
       {/* User Dashboard */}
       <Route
@@ -79,7 +91,6 @@ const AppRouter = () => {
         <Route path="my-reports" element={<MyReports />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="settings" element={<Settings />} />
-        {/* ✅ new watch party creator */}
         <Route path="watch" element={<WatchParty />} />
       </Route>
 
@@ -101,10 +112,9 @@ const AppRouter = () => {
         <Route path="settings" element={<SystemSettings />} />
       </Route>
 
-      {/* Public watch room */}
-      <Route path="/watch/:roomCode" element={<WatchRoom />} />
-
+      {/* IMPORTANT: keep the single-segment slug redirect route LAST among those routes above */}
       <Route path="/:slug" element={<RedirectHandler />} />
+
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

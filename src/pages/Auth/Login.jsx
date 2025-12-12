@@ -134,12 +134,24 @@ const Login = () => {
               Create account
             </Link>
           </p>
-          <p className="text-xs text-slate-500 text-center">
-            <Link to="/admin/login" className="hover:text-slate-400 transition-colors inline-flex items-center gap-1">
-              <span>Admin access</span>
-              <ArrowRight className="w-3 h-3" />
-            </Link>
-          </p>
+         <div className="mt-4 flex items-center justify-between">
+  {/* Back to Landing Button */}
+  <button
+    onClick={() => (window.location.href = '/')}
+    className="text-slate-400 text-sm hover:text-slate-200 transition"
+  >
+    ← Back to landing
+  </button>
+
+  {/* Admin Access Link */}
+  <a
+    href="/admin"
+    className="text-slate-400 text-sm hover:text-slate-200 transition"
+  >
+    Admin access →
+  </a>
+</div>
+
         </div>
       </Card>
     </div>

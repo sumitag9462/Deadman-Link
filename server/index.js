@@ -16,6 +16,7 @@ const adminLinkRoutes = require('./routes/adminLinkRoutes');
 const adminUserRoutes = require('./routes/adminUserRoutes');
 const moderationRoutes = require('./routes/moderationRoutes');
 const { router: authRoutes, authenticate } = require('./routes/authRoutes');
+const analyticsInsights = require('./routes/analyticsInsights');
 
 // Rate limiting and security middleware
 const { generalLimiter, authLimiter, linkCreationLimiter, redirectLimiter } = require('./middleware/rateLimiter');
@@ -46,6 +47,8 @@ app.use('/api/', generalLimiter);
 
 // ---- Auth routes with stricter rate limiting ----
 app.use('/api/auth', authLimiter, authRoutes);
+
+app.use('/api/analytics/insights', analyticsInsights);
 
 // ---- MongoDB connection ----
 const MONGO_URI =
